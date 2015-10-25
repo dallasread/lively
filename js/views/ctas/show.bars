@@ -1,0 +1,9 @@
+<div class="cta">
+    {{>cta-bar}}
+    <div class="screen"></div>
+
+    <div class="cta-content">
+        DASHBOARD<br><br>
+        Total chats, Ratings, average time to first response, availability, visitors online
+    </div>
+</div>

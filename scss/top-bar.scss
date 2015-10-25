@@ -1,0 +1,32 @@
+.top-bar {
+    @include clearfix();
+    @include noselect();
+
+    background: #222;
+    color: #999;
+
+    h1 {
+        float: left;
+        font-size: 24px;
+        padding: 15px 20px 16px;
+    }
+
+    ul {
+        float: right;
+
+        li {
+            float: left;
+            padding: 20px;
+
+            &:hover {
+                background: rgba(255, 255, 255, 0.1);
+                color: #bbb;
+            }
+
+            &.active, &.parent-of-active {
+                background: rgba(255, 255, 255, 0.2);
+                color: #fff;
+            }
+        }
+    }
+}

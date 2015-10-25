@@ -1,0 +1,5 @@
+<div class="lcs">
+    {{>top-bar}}
+    <div class="loading"></div>
+    <div data-outlet></div>
+</div>

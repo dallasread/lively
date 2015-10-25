@@ -1,0 +1,30 @@
+<div class="sub-bar">
+    <div class="toggler h1-wrapper" data-attr="app/cta/active">
+        <i class="fa fa-toggle-on {{#if app/cta/active}}true{{else}}fa-flip-horizontal{{/if}}"></i>
+        <h1>
+            {{app/cta/name}}
+        </h1>
+    </div>
+    <ul>
+        <li data-go="/ctas/{{app/cta/id}}">
+            <span class="title">Dashboard</span>
+            <span class="description">An overview of your chat.</span>
+        </li>
+        <li data-go="/ctas/{{app/cta/id}}/appearance">
+            <span class="title">Appearance</span>
+            <span class="description">How your chat looks.</span>
+        </li>
+        <li data-go="/ctas/{{app/cta/id}}/schedule">
+            <span class="title">Schedule</span>
+            <span class="description">Who can chat when?</span>
+        </li>
+        <li data-go="/ctas/{{app/cta/id}}/triggers">
+            <span class="title">Triggers</span>
+            <span class="description">Start a conversation.</span>
+        </li>
+        <li data-go="/ctas/{{app/cta/id}}/settings">
+            <span class="title">Settings</span>
+            <span class="description">Visibility and Resets.</span>
+        </li>
+    </ul>
+</div>

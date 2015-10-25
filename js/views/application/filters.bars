@@ -1,0 +1,23 @@
+<div class="sub-bar">
+    <form>
+        <select>
+            <option>{{app/cta/name}}</option>
+        </select>
+        <select>
+            <option>Everyone</option>
+            <option>Who's Online</option>
+            <option>Chatted Recently</option>
+        </select>
+        <input type="text" name="from" value="{{filters/from}}" placeholder="From">
+        <input type="text" name="to" value="{{filters/to}}" placeholder="To">
+    </form>
+
+    <ul>
+        <li data-change-input-value="page" data-value="1">
+            <i class="fa fa-angle-left"></i>
+        </li>
+        <li data-change-input-value="page" data-value="2">
+            <i class="fa fa-angle-right"></i>
+        </li>
+    </ul>
+</div>

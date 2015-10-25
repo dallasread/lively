@@ -1,0 +1,13 @@
+{{>accounts-bar}}
+
+<form>
+    <div class="field">
+        <label>CC#</label>
+        <input type="email" name="message">
+    </div>
+    <div class="action">
+        <button class="btn btn-large btn-blue">
+            Save Account
+        </button>
+    </div>
+</form>

@@ -1,0 +1,19 @@
+<div class="sub-bar">
+    <div class="h1-wrapper">
+        <h1>
+            Help
+        </h1>
+    </div>
+</div>
+
+<form>
+    <div class="field">
+        <label>Send us a message and we'll respond as soon as we can!</label>
+        <textarea name="message"></textarea>
+    </div>
+    <div class="action">
+        <button class="btn btn-large btn-blue">
+            Send Message
+        </button>
+    </div>
+</form>

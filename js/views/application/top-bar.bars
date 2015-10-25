@@ -1,0 +1,10 @@
+<div class="top-bar">
+    <h1 data-go="/">LCS</h1>
+    <ul>
+        <li data-go="/people">People</li>
+        <li data-go="/">Conversations</li>
+        <li data-go="/ctas/{{cta/id}}">Lively Chat</li>
+        <li data-go="/help">Help</li>
+        <li data-go="/accounts/edit">My Account</li>
+    </ul>
+</div>

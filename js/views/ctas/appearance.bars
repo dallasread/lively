@@ -1,0 +1,20 @@
+
+<div class="cta">
+    {{>cta-bar}}
+
+    <div class="cta-content">
+        APPEARANCE.
+
+        # ONLINE
+        [color]
+        [trigger]
+        [position on screen]
+        [actions?]
+
+        # OFFLINE
+        [exists]
+        [trigger]
+        [actions: emails to send]
+        [thank you text]
+    </div>
+</div>

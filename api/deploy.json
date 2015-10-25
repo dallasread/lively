@@ -1,0 +1,45 @@
+{
+    "defaults": {
+        "lambda": {
+            "memorySize": 128,
+            "role": "arn:aws:iam::347191724861:role/Lambda",
+            "runtime": "nodejs",
+            "timeout": 60
+        }
+    },
+    "aws": {
+        "profile": "personal",
+        "region": "us-east-1",
+        "IdentityPoolId": "GovVote"
+    },
+    "sdk": {
+        "name": "GovVote",
+        "path": "./sdk.js"
+    },
+    "routes": [
+        {
+            "lambda": {
+                "code": "./issues/vote"
+            },
+            "gateway": {
+                "method": "POST",
+                "path": "/issues/{id}/vote"
+            },
+            "sdk": {
+                "method": "issuesVote"
+            }
+        },
+        {
+            "lambda": {
+                "code": "./auth/facebook"
+            },
+            "gateway": {
+                "method": "POST",
+                "path": "/auth/facebook"
+            },
+            "sdk": {
+                "method": "authFacebook"
+            }
+        }
+    ]
+}

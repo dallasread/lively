@@ -1,0 +1,26 @@
+{{>filters}}
+
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Mobile</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr data-go="/people">
+            <td>Dallas Read</td>
+            <td>dallas@excitecreative.ca</td>
+            <td>+19029997606</td>
+            <td>Delete</td>
+        </tr>
+        <tr data-go="/people">
+            <td>Dallas Read</td>
+            <td>dallas@excitecreative.ca</td>
+            <td>+19029997606</td>
+            <td>Delete</td>
+        </tr>
+    </tbody>
+</table>

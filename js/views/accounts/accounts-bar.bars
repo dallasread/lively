@@ -1,0 +1,21 @@
+<div class="sub-bar">
+    <div class="h1-wrapper">
+        <h1>
+            My Account
+        </h1>
+    </div>
+    <ul>
+        <li data-go="/accounts/edit">
+            <span class="title">My Account</span>
+            <span class="description">Your Personal Details</span>
+        </li>
+        <li data-go="/accounts/users">
+            <span class="title">Users</span>
+            <span class="description">Connected Users</span>
+        </li>
+        <li data-go="/accounts/billing">
+            <span class="title">Billing</span>
+            <span class="description">Upgrade Your Plan</span>
+        </li>
+    </ul>
+</div>

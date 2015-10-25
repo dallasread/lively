@@ -1,0 +1,82 @@
+.sub-bar {
+    @include clearfix();
+    @include noselect();
+
+    background: #eaeaea;
+    color: #666;
+    margin: -50px -50px 50px -50px;
+
+    form {
+        padding: 17px 20px 18px;
+        display: inline-block;
+    }
+
+    .h1-wrapper {
+        float: left;
+        font-size: 24px;
+        line-height: 33px;
+        padding: 21px 20px;
+        display: inline-block;
+        color: #964444;
+
+        h1 {
+            color: #333;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        i {
+            font-size: 33px;
+            margin-right: 10px;
+        }
+    }
+
+    .toggler {
+        .true {
+            color: #21a33e;
+        }
+    }
+
+    ul {
+        float: right;
+
+        li[data-go], li[data-change-input-value] {
+            float: left;
+            padding: 15px 20px;
+            margin: 10px 10px 0 0;
+            border-radius: 5px 5px 0 0;
+            text-align: center;
+            cursor: pointer;
+
+            &:hover {
+                background: #fafafa;
+                color: #444;
+            }
+
+            &.active {
+                background: #fff;
+                color: #111;
+            }
+
+            &[data-change-input-value] {
+                border-radius: 5px;
+            }
+
+            .title {
+                font-weight: bold;
+                display: block;
+            }
+
+            .description {
+                margin-top: 7px;
+                font-size: 11px;
+                display: inline-block;
+            }
+        }
+    }
+
+    input[type="text"], select, textarea {
+        padding: 10px;
+        margin-right: 20px;
+    }
+}
