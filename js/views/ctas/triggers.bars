@@ -1,7 +1,1 @@
-<div class="cta">
-    {{>cta-bar}}
-
-    <div class="cta-content">
-        TRIGGERS
-    </div>
-</div>
+TRIGGERS

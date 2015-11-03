@@ -1,5 +1,3 @@
-{{>accounts-bar}}
-
 <form>
     <div class="field">
         <label>CC#</label>

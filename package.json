@@ -1,5 +1,5 @@
 {
-  "name": "gov.vote",
+  "name": "lively",
   "version": "1.0.0",
   "main": "js/index.js",
   "scripts": {
@@ -23,10 +23,12 @@
     "yargs": "^3.24.0"
   },
   "dependencies": {
+    "api-deploy": "^0.1.4",
     "async": "^1.4.2",
     "bars": "^0.1.9",
     "generate-js-bindings": "^1.0.10",
-    "generate-js-custom-element": "0.0.5",
+    "generate-js-custom-element": "^1.0.0",
+    "gulp": "^3.9.0",
     "jquery": "^2.1.4",
     "moment": "^2.10.6"
   }

@@ -1,4 +1,4 @@
-var Route = require('../../utils/route'),
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/help/index.bars')

@@ -1,0 +1,44 @@
+{
+    "swagger": "2.0",
+    "x-apiDeploy": {
+        "aws": {
+            "profile": "personal",
+            "region": "us-east-1"
+        },
+        "lambda": {
+            "memory-size": 128,
+            "role": "arn:aws:iam::347191724861:role/Lambda",
+            "runtime": "nodejs",
+            "timeout": 60
+        },
+        "sdk": {
+            "name": "RM",
+            "path": "./sdk.js",
+            "method": "apiGateway"
+        },
+        "apiGateway": {
+            "id": "p2j1bqn903"
+        }
+    },
+    "paths": {
+        "/events": {
+            "post": {
+                "x-apiDeploy": {
+                    "lambda": {
+                        "handler": "./events/create.js"
+                    },
+                    "sdk": {
+                        "method": "createEvent"
+                    }
+                }
+            }
+        },
+        "/": {
+            "x-apiDeploy": {
+                "apiGateway": {
+                    "id": "xwim464e27"
+                }
+            }
+        }
+    }
+}

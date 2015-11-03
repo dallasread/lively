@@ -1,4 +1,4 @@
-var CustomElement = require('../utils/custom-element'),
+var CustomElement = require('generate-js-custom-element'),
     Bindable = require('generate-js-bindings');
 
 var config = {
@@ -40,7 +40,7 @@ Route.definePrototype({
 
         return _.get('params');
     },
-    unload: function unload() { }
+    // unload: function unload() { }
     // onShow: function onShow() {}
 });
 

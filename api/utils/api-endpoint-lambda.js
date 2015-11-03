@@ -1,34 +1,17 @@
-var EndPoint = require('api-endpoint'),
-    vogels = require('vogels');
+var EndPoint = require('api-endpoint');
 
-EndPoint.vogels = vogels;
-EndPoint.localMode = !EndPoint.vogels.AWS.config.credentials;
-
-if (EndPoint.localMode) {
-    EndPoint.vogels.AWS.config.update({region: 'us-east-1'});
-    EndPoint.vogels.AWS.config.credentials = new EndPoint.vogels.AWS.SharedIniFileCredentials({
-        profile: 'personal'
-    });
-}
-
-EndPoint.definePrototype({
-    lambda: function lambda(event, context) {
-        var _ = this;
-
-        _.run(event, function(err, data) {
+EndPoint.lambda = function(endpoint) {
+    endpoint.handler = function handler(event, context) {
+        endpoint.run(event, function(err, data) {
             if (err) {
                 context.fail(err);
             } else {
                 context.succeed(data);
             }
         });
-    }
-});
-
-EndPoint.handler = function endPointHandler(endpoint) {
-    return function handler(e, c) {
-        endpoint.lambda(e, c);
     };
+
+    return endpoint;
 };
 
 module.exports = EndPoint;

@@ -6,14 +6,14 @@
         </h1>
     </div>
     <ul>
-        <li data-go="/ctas/{{app/cta/id}}">
+        <li data-go="/ctas/{{app/cta/id}}/dashboard">
             <span class="title">Dashboard</span>
             <span class="description">An overview of your chat.</span>
         </li>
-        <li data-go="/ctas/{{app/cta/id}}/appearance">
+        <!-- <li data-go="/ctas/{{app/cta/id}}/appearance">
             <span class="title">Appearance</span>
             <span class="description">How your chat looks.</span>
-        </li>
+        </li> -->
         <li data-go="/ctas/{{app/cta/id}}/schedule">
             <span class="title">Schedule</span>
             <span class="description">Who can chat when?</span>
@@ -28,3 +28,7 @@
         </li>
     </ul>
 </div>
+
+{{#unless app/cta/active}}
+    Oh noes! This is inactive!
+{{/unless}}

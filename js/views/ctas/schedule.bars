@@ -1,9 +1,4 @@
-<div class="cta">
-    {{>cta-bar}}
-    <div class="cta-content">
-        SCHEUDLES.
+SCHEUDLES.
 
-        [When are agents available to chat?]
-        [Which Agents are available?]
-    </div>
-</div>
+[When are agents available to chat?]
+[Which Agents are available?]

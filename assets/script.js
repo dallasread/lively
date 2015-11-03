@@ -1,7 +1,2816 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+module.exports = {
+    Router: require('./lib/router'),
+    Route: require('./lib/route')
+};
+
+},{"./lib/route":2,"./lib/router":3}],2:[function(require,module,exports){
+var CustomElement = require('generate-js-custom-element'),
+    Bindable = require('generate-js-bindings');
+
+var config = {
+    templates: {
+        index: 'No template set for {{@key}}.'
+    }
+};
+
+var Route = CustomElement.createElement(config, function Route(options) {
+    var _ = this;
+
+    _.supercreate(options);
+
+    _.$element
+        .attr('data-blueprint', options.blueprint)
+        .attr('data-path', options.path);
+});
+
+Bindable.generateGettersSetters(Route, ['app', 'params', 'parent', 'path', 'blueprint']);
+
+Route.definePrototype({
+    beforeLoad: function beforeLoad(done) {
+        typeof done === 'function' && done();
+    },
+
+    afterLoad: function afterLoad(done) {
+        typeof done === 'function' && done();
+    },
+
+    beforeUnload: function beforeUnload(done) {
+        typeof done === 'function' && done();
+    },
+
+    afterUnload: function afterUnload(done) {
+        typeof done === 'function' && done();
+    },
+
+    _append: function _append() {
+        var _ = this;
+
+        if (_.$element[0].parentElement) return;
+
+        if (_.parent) {
+            _.parent.$element.find('[data-outlet]:first').append(_.$element);
+        } else {
+            _.app.$element.append(_.$element);
+        }
+    },
+
+    _remove: function _remove() {
+        var _ = this,
+            $el = _.$element[0],
+            $parent = $el.parentElement;
+
+        _.parent = null;
+        if (!$parent) return;
+
+        $parent.removeChild($el);
+    }
+});
+
+module.exports = Route;
+
+},{"generate-js-bindings":12,"generate-js-custom-element":15}],3:[function(require,module,exports){
+var CustomElement = require('generate-js-custom-element'),
+    Bindable = require('generate-js-bindings'),
+    Interactions = require('./interactions'),
+    urlHandlers = require('./url-handlers'),
+    applyParams = require('../utils/apply-params'),
+    async = require('async'),
+    config = {
+        templates: {
+            index: ''
+        }
+    };
+
+var Router = CustomElement.createElement(config, function Router(options) {
+    var _ = this;
+
+    _.supercreate({
+        $element: options.$element
+    });
+
+    _.defineProperties({
+        routesCache: {}
+    });
+
+    _.defineProperties({
+        writable: true,
+        enumerable: true
+    }, options);
+
+    _.urlType = _.urlType || 'hash', // hash | history | none
+
+    _.defineProperties(urlHandlers[_.urlType]);
+    _.detectPathChanges();
+});
+
+Router.attach(Interactions);
+Bindable.generateGettersSetters(Router, ['currentRoute']);
+
+Router.definePrototype({
+    findRoute: function findRoute(path) {
+        var _ = this,
+            routeNames = Object.keys(_.routes),
+            routeNamesLength = routeNames.length,
+            routeName, routeRegex, route;
+
+        for (var i = 0; i < routeNamesLength; i++) {
+            routeName = routeNames[i];
+            routeRegex = new RegExp('^' + routeName.replace(/:[^/$\^]+/, '[^/$\^]+') + '$');
+
+            if (routeRegex.test(path)) {
+                route = _.routesCache[path];
+
+                if (!route) {
+                    route = _.routesCache[path] = _.routes[routeName].create({
+                        blueprint: routeName,
+                        path: path,
+                        app: _,
+                        params: applyParams(routeName, path)
+                    });
+                }
+
+                break;
+            }
+        }
+
+        return route;
+    },
+
+    go: function go(path) {
+        var _ = this;
+
+        path = path || _.findPath(path);
+
+        var validateFormat = _.validatePathFormat(path);
+
+        if (!validateFormat.valid) {
+            // _.debug && console.debug('Path is not valid: ' + path);
+            validateFormat.action();
+            return;
+        }
+
+        var route = _.findRoute(path);
+
+        if (route === _.currentRoute) {
+            _.debug && console.debug('Route is already present: ' + path);
+            return;
+        }
+
+        if (!route) {
+            _.debug && console.debug('Route not found: ' + path);
+            if (_.currentRoute) _.go(_.currentRoute.path);
+            return;
+        }
+
+        _.debug && console.debug('Transitioning to: ', route.path);
+        _.transitionTo(route);
+    },
+
+    transitionTo: function transitionTo(route) {
+        var _ = this;
+
+        var newPathSplit = route.path.split('/'),
+            newPathSplitLength = newPathSplit.length,
+            newPathSegment = '',
+            routesToUnload = [],
+            routesToLoad = [],
+            i = 0,
+            newRoute, lastParent;
+
+        route.ancestors = [];
+
+        // Build ancestors
+        for (i = 0; i < newPathSplitLength; i++) {
+            newPathSegment += (newPathSegment[newPathSegment.length - 1] === '/' ? '' : '/') + newPathSplit[i];
+            newRoute = _.findRoute(newPathSegment);
+
+            if (newRoute) {
+                if (lastParent && newRoute != lastParent) {
+                    newRoute.parent = lastParent;
+                }
+
+                route.ancestors.push(newRoute);
+                lastParent = newRoute;
+            }
+        }
+
+        var newAncestors = route.ancestors,
+            newAncestorsLength = newAncestors.length,
+            currentAncestors = _.currentRoute ? _.currentRoute.ancestors : [],
+            currentAncestorsLength = currentAncestors.length,
+            removeRemainingCurrentAncestors = false,
+            newAncestor, currentAncestor;
+
+        for (i = 0; i < Math.max(newAncestorsLength, currentAncestorsLength); i++) {
+            newAncestor = newAncestors[i];
+            currentAncestor = currentAncestors[i];
+
+            if (newAncestor !== currentAncestor) {
+                if (currentAncestor && i < currentAncestorsLength) {
+                    removeRemainingCurrentAncestors = true;
+                    routesToUnload.unshift(currentAncestor);
+                }
+            }
+
+            if (
+                (newAncestor && newAncestor !== currentAncestor) ||
+                (newAncestor && i < newAncestorsLength)
+            ) {
+                routesToLoad.push(newAncestor);
+            }
+        }
+
+        async.eachSeries(routesToUnload, function iterator(r, done) {
+            _.debug && console.debug('Unloading: ', r.path);
+            r.beforeUnload(function() {
+                r._remove();
+                r.afterUnload(function() {
+                    done();
+                });
+            });
+        }, function done() {
+            _.currentRoute = route;
+            _.markActive(route.path);
+
+            async.eachSeries(route.ancestors, function performBeforeLoads(r, done) {
+                _.debug && console.debug('Loading: ', r.path);
+
+                r._append();
+                r.update();
+                function load() {
+                    r.afterLoad(function() {
+                        r.$element.find('[autofocus]:first').trigger('focus');
+                        _.debug && console.debug('Done Loading: ', r.path);
+                        done();
+                    });
+                }
+
+                if (routesToLoad.indexOf(r) !== -1) {
+                    r.beforeLoad(function(err) {
+                        if (typeof err === 'string') return done(err);
+                        load();
+                    });
+                } else {
+                    load();
+                }
+            }, function done(err) {
+                if (typeof err === 'string') {
+                    _.debug && console.debug('Redirecting: ', err);
+                    return _.go(err);
+                }
+
+                _.markActive(route.path);
+            });
+        });
+    },
+
+    markActive: function markActive(path) {
+        if (!path) return;
+
+        var _ = this,
+            splath = path.split('/');
+
+        _.$element.find('[href], [data-go]')
+            .removeClass('active')
+            .removeClass('parent-of-active');
+
+        _.$element.find('[href="#!' + path + '"], [data-go="' + path + '"]')
+            .addClass('active');
+
+        var ancestorPath = '';
+        for (var i = 1; i < splath.length - 1; i++) {
+            ancestorPath += '/' + splath[i];
+
+            _.$element.find('[href="#!' + ancestorPath + '"], [data-go="' + ancestorPath + '"]')
+                .addClass('parent-of-active');
+        }
+    }
+});
+
+module.exports = Router;
+
+},{"../utils/apply-params":9,"./interactions":4,"./url-handlers":7,"async":11,"generate-js-bindings":12,"generate-js-custom-element":15}],4:[function(require,module,exports){
+var XBrowser = require('../utils/x-browser');
+
+module.exports = {
+    interactions: {
+        go: {
+            event: XBrowser.event('click'),
+            target: '[data-go]',
+            listener: function listener(e, $el) {
+                var _ = this;
+                _.go($el.attr('data-go'));
+            }
+        }
+    }
+};
+
+},{"../utils/x-browser":10}],5:[function(require,module,exports){
+function stripHash(hash) {
+    return hash && (hash + '').replace(/#!/, '');
+}
+
+module.exports = {
+    detectPathChanges: function detectPathChanges() {
+        var _ = this;
+
+        $(window).on('hashchange', function() {
+            _.go();
+        });
+    },
+
+    findPath: function findPath(path) {
+        return path || stripHash(window.location.hash);
+    },
+
+    validatePathFormat: function validatePathFormat(path) {
+        if (window.location.hash !== '#!' + path) {
+            return {
+                valid: false,
+                action: function invalidPathAction() {
+                    window.location.hash = '#!' + path;
+                }
+            };
+        }
+
+        return {
+            valid: path && path.length && path[0] === '/',
+            action: function invalidPathAction() {
+                window.location.hash = '#!/';
+            }
+        };
+    }
+};
+
+},{}],6:[function(require,module,exports){
+module.exports = {
+    detectPathChanges: function detectPathChanges() { },
+
+    findPath: function findPath(path) {
+        return path || '/';
+    },
+
+    validatePathFormat: function validatePathFormat(path) {
+        return {
+            valid: true,
+            action: function invalidPathAction() {}
+        };
+    }
+};
+
+},{}],7:[function(require,module,exports){
+module.exports = {
+    hash: require('./hash'),
+    history: require('./history'),
+    none: require('./none')
+};
+
+},{"./hash":5,"./history":6,"./none":8}],8:[function(require,module,exports){
+arguments[4][6][0].apply(exports,arguments)
+},{"dup":6}],9:[function(require,module,exports){
+module.exports = function applyParams(pattern, path) {
+    var params = {},
+        patternSplit = pattern.split('/'),
+        pathSplit = path.split('/'),
+        segment;
+
+    for (var i = 0; i < patternSplit.length; i++) {
+        segment = patternSplit[i];
+
+        if (segment[0] === ':') {
+            params[segment.replace(/:/, '')] = pathSplit[i];
+        }
+    }
+
+    return params;
+};
+
+},{}],10:[function(require,module,exports){
+var browser = {
+        isTouch: 'ontouchstart' in document.documentElement
+    },
+    touchEvents = {
+        click: 'touchend',
+        mouseenter: 'touchstart',
+        mouseleave: 'touchend touchcancel touchmove'
+    };
+
+browser.event = function(event) {
+    if (this.isTouch) {
+        return touchEvents[event];
+    } else {
+        return event;
+    }
+};
+
+module.exports = browser;
+
+},{}],11:[function(require,module,exports){
+(function (process,global){
+/*!
+ * async
+ * https://github.com/caolan/async
+ *
+ * Copyright 2010-2014 Caolan McMahon
+ * Released under the MIT license
+ */
+(function () {
+
+    var async = {};
+    function noop() {}
+    function identity(v) {
+        return v;
+    }
+    function toBool(v) {
+        return !!v;
+    }
+    function notId(v) {
+        return !v;
+    }
+
+    // global on the server, window in the browser
+    var previous_async;
+
+    // Establish the root object, `window` (`self`) in the browser, `global`
+    // on the server, or `this` in some virtual machines. We use `self`
+    // instead of `window` for `WebWorker` support.
+    var root = typeof self === 'object' && self.self === self && self ||
+            typeof global === 'object' && global.global === global && global ||
+            this;
+
+    if (root != null) {
+        previous_async = root.async;
+    }
+
+    async.noConflict = function () {
+        root.async = previous_async;
+        return async;
+    };
+
+    function only_once(fn) {
+        return function() {
+            if (fn === null) throw new Error("Callback was already called.");
+            fn.apply(this, arguments);
+            fn = null;
+        };
+    }
+
+    function _once(fn) {
+        return function() {
+            if (fn === null) return;
+            fn.apply(this, arguments);
+            fn = null;
+        };
+    }
+
+    //// cross-browser compatiblity functions ////
+
+    var _toString = Object.prototype.toString;
+
+    var _isArray = Array.isArray || function (obj) {
+        return _toString.call(obj) === '[object Array]';
+    };
+
+    // Ported from underscore.js isObject
+    var _isObject = function(obj) {
+        var type = typeof obj;
+        return type === 'function' || type === 'object' && !!obj;
+    };
+
+    function _isArrayLike(arr) {
+        return _isArray(arr) || (
+            // has a positive integer length property
+            typeof arr.length === "number" &&
+            arr.length >= 0 &&
+            arr.length % 1 === 0
+        );
+    }
+
+    function _arrayEach(arr, iterator) {
+        var index = -1,
+            length = arr.length;
+
+        while (++index < length) {
+            iterator(arr[index], index, arr);
+        }
+    }
+
+    function _map(arr, iterator) {
+        var index = -1,
+            length = arr.length,
+            result = Array(length);
+
+        while (++index < length) {
+            result[index] = iterator(arr[index], index, arr);
+        }
+        return result;
+    }
+
+    function _range(count) {
+        return _map(Array(count), function (v, i) { return i; });
+    }
+
+    function _reduce(arr, iterator, memo) {
+        _arrayEach(arr, function (x, i, a) {
+            memo = iterator(memo, x, i, a);
+        });
+        return memo;
+    }
+
+    function _forEachOf(object, iterator) {
+        _arrayEach(_keys(object), function (key) {
+            iterator(object[key], key);
+        });
+    }
+
+    function _indexOf(arr, item) {
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] === item) return i;
+        }
+        return -1;
+    }
+
+    var _keys = Object.keys || function (obj) {
+        var keys = [];
+        for (var k in obj) {
+            if (obj.hasOwnProperty(k)) {
+                keys.push(k);
+            }
+        }
+        return keys;
+    };
+
+    function _keyIterator(coll) {
+        var i = -1;
+        var len;
+        var keys;
+        if (_isArrayLike(coll)) {
+            len = coll.length;
+            return function next() {
+                i++;
+                return i < len ? i : null;
+            };
+        } else {
+            keys = _keys(coll);
+            len = keys.length;
+            return function next() {
+                i++;
+                return i < len ? keys[i] : null;
+            };
+        }
+    }
+
+    // Similar to ES6's rest param (http://ariya.ofilabs.com/2013/03/es6-and-rest-parameter.html)
+    // This accumulates the arguments passed into an array, after a given index.
+    // From underscore.js (https://github.com/jashkenas/underscore/pull/2140).
+    function _restParam(func, startIndex) {
+        startIndex = startIndex == null ? func.length - 1 : +startIndex;
+        return function() {
+            var length = Math.max(arguments.length - startIndex, 0);
+            var rest = Array(length);
+            for (var index = 0; index < length; index++) {
+                rest[index] = arguments[index + startIndex];
+            }
+            switch (startIndex) {
+                case 0: return func.call(this, rest);
+                case 1: return func.call(this, arguments[0], rest);
+            }
+            // Currently unused but handle cases outside of the switch statement:
+            // var args = Array(startIndex + 1);
+            // for (index = 0; index < startIndex; index++) {
+            //     args[index] = arguments[index];
+            // }
+            // args[startIndex] = rest;
+            // return func.apply(this, args);
+        };
+    }
+
+    function _withoutIndex(iterator) {
+        return function (value, index, callback) {
+            return iterator(value, callback);
+        };
+    }
+
+    //// exported async module functions ////
+
+    //// nextTick implementation with browser-compatible fallback ////
+
+    // capture the global reference to guard against fakeTimer mocks
+    var _setImmediate = typeof setImmediate === 'function' && setImmediate;
+
+    var _delay = _setImmediate ? function(fn) {
+        // not a direct alias for IE10 compatibility
+        _setImmediate(fn);
+    } : function(fn) {
+        setTimeout(fn, 0);
+    };
+
+    if (typeof process === 'object' && typeof process.nextTick === 'function') {
+        async.nextTick = process.nextTick;
+    } else {
+        async.nextTick = _delay;
+    }
+    async.setImmediate = _setImmediate ? _delay : async.nextTick;
+
+
+    async.forEach =
+    async.each = function (arr, iterator, callback) {
+        return async.eachOf(arr, _withoutIndex(iterator), callback);
+    };
+
+    async.forEachSeries =
+    async.eachSeries = function (arr, iterator, callback) {
+        return async.eachOfSeries(arr, _withoutIndex(iterator), callback);
+    };
+
+
+    async.forEachLimit =
+    async.eachLimit = function (arr, limit, iterator, callback) {
+        return _eachOfLimit(limit)(arr, _withoutIndex(iterator), callback);
+    };
+
+    async.forEachOf =
+    async.eachOf = function (object, iterator, callback) {
+        callback = _once(callback || noop);
+        object = object || [];
+
+        var iter = _keyIterator(object);
+        var key, completed = 0;
+
+        while ((key = iter()) != null) {
+            completed += 1;
+            iterator(object[key], key, only_once(done));
+        }
+
+        if (completed === 0) callback(null);
+
+        function done(err) {
+            completed--;
+            if (err) {
+                callback(err);
+            }
+            // Check key is null in case iterator isn't exhausted
+            // and done resolved synchronously.
+            else if (key === null && completed <= 0) {
+                callback(null);
+            }
+        }
+    };
+
+    async.forEachOfSeries =
+    async.eachOfSeries = function (obj, iterator, callback) {
+        callback = _once(callback || noop);
+        obj = obj || [];
+        var nextKey = _keyIterator(obj);
+        var key = nextKey();
+        function iterate() {
+            var sync = true;
+            if (key === null) {
+                return callback(null);
+            }
+            iterator(obj[key], key, only_once(function (err) {
+                if (err) {
+                    callback(err);
+                }
+                else {
+                    key = nextKey();
+                    if (key === null) {
+                        return callback(null);
+                    } else {
+                        if (sync) {
+                            async.setImmediate(iterate);
+                        } else {
+                            iterate();
+                        }
+                    }
+                }
+            }));
+            sync = false;
+        }
+        iterate();
+    };
+
+
+
+    async.forEachOfLimit =
+    async.eachOfLimit = function (obj, limit, iterator, callback) {
+        _eachOfLimit(limit)(obj, iterator, callback);
+    };
+
+    function _eachOfLimit(limit) {
+
+        return function (obj, iterator, callback) {
+            callback = _once(callback || noop);
+            obj = obj || [];
+            var nextKey = _keyIterator(obj);
+            if (limit <= 0) {
+                return callback(null);
+            }
+            var done = false;
+            var running = 0;
+            var errored = false;
+
+            (function replenish () {
+                if (done && running <= 0) {
+                    return callback(null);
+                }
+
+                while (running < limit && !errored) {
+                    var key = nextKey();
+                    if (key === null) {
+                        done = true;
+                        if (running <= 0) {
+                            callback(null);
+                        }
+                        return;
+                    }
+                    running += 1;
+                    iterator(obj[key], key, only_once(function (err) {
+                        running -= 1;
+                        if (err) {
+                            callback(err);
+                            errored = true;
+                        }
+                        else {
+                            replenish();
+                        }
+                    }));
+                }
+            })();
+        };
+    }
+
+
+    function doParallel(fn) {
+        return function (obj, iterator, callback) {
+            return fn(async.eachOf, obj, iterator, callback);
+        };
+    }
+    function doParallelLimit(fn) {
+        return function (obj, limit, iterator, callback) {
+            return fn(_eachOfLimit(limit), obj, iterator, callback);
+        };
+    }
+    function doSeries(fn) {
+        return function (obj, iterator, callback) {
+            return fn(async.eachOfSeries, obj, iterator, callback);
+        };
+    }
+
+    function _asyncMap(eachfn, arr, iterator, callback) {
+        callback = _once(callback || noop);
+        arr = arr || [];
+        var results = _isArrayLike(arr) ? [] : {};
+        eachfn(arr, function (value, index, callback) {
+            iterator(value, function (err, v) {
+                results[index] = v;
+                callback(err);
+            });
+        }, function (err) {
+            callback(err, results);
+        });
+    }
+
+    async.map = doParallel(_asyncMap);
+    async.mapSeries = doSeries(_asyncMap);
+    async.mapLimit = doParallelLimit(_asyncMap);
+
+    // reduce only has a series version, as doing reduce in parallel won't
+    // work in many situations.
+    async.inject =
+    async.foldl =
+    async.reduce = function (arr, memo, iterator, callback) {
+        async.eachOfSeries(arr, function (x, i, callback) {
+            iterator(memo, x, function (err, v) {
+                memo = v;
+                callback(err);
+            });
+        }, function (err) {
+            callback(err, memo);
+        });
+    };
+
+    async.foldr =
+    async.reduceRight = function (arr, memo, iterator, callback) {
+        var reversed = _map(arr, identity).reverse();
+        async.reduce(reversed, memo, iterator, callback);
+    };
+
+    async.transform = function (arr, memo, iterator, callback) {
+        if (arguments.length === 3) {
+            callback = iterator;
+            iterator = memo;
+            memo = _isArray(arr) ? [] : {};
+        }
+
+        async.eachOf(arr, function(v, k, cb) {
+            iterator(memo, v, k, cb);
+        }, function(err) {
+            callback(err, memo);
+        });
+    };
+
+    function _filter(eachfn, arr, iterator, callback) {
+        var results = [];
+        eachfn(arr, function (x, index, callback) {
+            iterator(x, function (v) {
+                if (v) {
+                    results.push({index: index, value: x});
+                }
+                callback();
+            });
+        }, function () {
+            callback(_map(results.sort(function (a, b) {
+                return a.index - b.index;
+            }), function (x) {
+                return x.value;
+            }));
+        });
+    }
+
+    async.select =
+    async.filter = doParallel(_filter);
+
+    async.selectLimit =
+    async.filterLimit = doParallelLimit(_filter);
+
+    async.selectSeries =
+    async.filterSeries = doSeries(_filter);
+
+    function _reject(eachfn, arr, iterator, callback) {
+        _filter(eachfn, arr, function(value, cb) {
+            iterator(value, function(v) {
+                cb(!v);
+            });
+        }, callback);
+    }
+    async.reject = doParallel(_reject);
+    async.rejectLimit = doParallelLimit(_reject);
+    async.rejectSeries = doSeries(_reject);
+
+    function _createTester(eachfn, check, getResult) {
+        return function(arr, limit, iterator, cb) {
+            function done() {
+                if (cb) cb(getResult(false, void 0));
+            }
+            function iteratee(x, _, callback) {
+                if (!cb) return callback();
+                iterator(x, function (v) {
+                    if (cb && check(v)) {
+                        cb(getResult(true, x));
+                        cb = iterator = false;
+                    }
+                    callback();
+                });
+            }
+            if (arguments.length > 3) {
+                eachfn(arr, limit, iteratee, done);
+            } else {
+                cb = iterator;
+                iterator = limit;
+                eachfn(arr, iteratee, done);
+            }
+        };
+    }
+
+    async.any =
+    async.some = _createTester(async.eachOf, toBool, identity);
+
+    async.someLimit = _createTester(async.eachOfLimit, toBool, identity);
+
+    async.all =
+    async.every = _createTester(async.eachOf, notId, notId);
+
+    async.everyLimit = _createTester(async.eachOfLimit, notId, notId);
+
+    function _findGetResult(v, x) {
+        return x;
+    }
+    async.detect = _createTester(async.eachOf, identity, _findGetResult);
+    async.detectSeries = _createTester(async.eachOfSeries, identity, _findGetResult);
+    async.detectLimit = _createTester(async.eachOfLimit, identity, _findGetResult);
+
+    async.sortBy = function (arr, iterator, callback) {
+        async.map(arr, function (x, callback) {
+            iterator(x, function (err, criteria) {
+                if (err) {
+                    callback(err);
+                }
+                else {
+                    callback(null, {value: x, criteria: criteria});
+                }
+            });
+        }, function (err, results) {
+            if (err) {
+                return callback(err);
+            }
+            else {
+                callback(null, _map(results.sort(comparator), function (x) {
+                    return x.value;
+                }));
+            }
+
+        });
+
+        function comparator(left, right) {
+            var a = left.criteria, b = right.criteria;
+            return a < b ? -1 : a > b ? 1 : 0;
+        }
+    };
+
+    async.auto = function (tasks, concurrency, callback) {
+        if (!callback) {
+            // concurrency is optional, shift the args.
+            callback = concurrency;
+            concurrency = null;
+        }
+        callback = _once(callback || noop);
+        var keys = _keys(tasks);
+        var remainingTasks = keys.length;
+        if (!remainingTasks) {
+            return callback(null);
+        }
+        if (!concurrency) {
+            concurrency = remainingTasks;
+        }
+
+        var results = {};
+        var runningTasks = 0;
+
+        var listeners = [];
+        function addListener(fn) {
+            listeners.unshift(fn);
+        }
+        function removeListener(fn) {
+            var idx = _indexOf(listeners, fn);
+            if (idx >= 0) listeners.splice(idx, 1);
+        }
+        function taskComplete() {
+            remainingTasks--;
+            _arrayEach(listeners.slice(0), function (fn) {
+                fn();
+            });
+        }
+
+        addListener(function () {
+            if (!remainingTasks) {
+                callback(null, results);
+            }
+        });
+
+        _arrayEach(keys, function (k) {
+            var task = _isArray(tasks[k]) ? tasks[k]: [tasks[k]];
+            var taskCallback = _restParam(function(err, args) {
+                runningTasks--;
+                if (args.length <= 1) {
+                    args = args[0];
+                }
+                if (err) {
+                    var safeResults = {};
+                    _forEachOf(results, function(val, rkey) {
+                        safeResults[rkey] = val;
+                    });
+                    safeResults[k] = args;
+                    callback(err, safeResults);
+                }
+                else {
+                    results[k] = args;
+                    async.setImmediate(taskComplete);
+                }
+            });
+            var requires = task.slice(0, task.length - 1);
+            // prevent dead-locks
+            var len = requires.length;
+            var dep;
+            while (len--) {
+                if (!(dep = tasks[requires[len]])) {
+                    throw new Error('Has inexistant dependency');
+                }
+                if (_isArray(dep) && _indexOf(dep, k) >= 0) {
+                    throw new Error('Has cyclic dependencies');
+                }
+            }
+            function ready() {
+                return runningTasks < concurrency && _reduce(requires, function (a, x) {
+                    return (a && results.hasOwnProperty(x));
+                }, true) && !results.hasOwnProperty(k);
+            }
+            if (ready()) {
+                runningTasks++;
+                task[task.length - 1](taskCallback, results);
+            }
+            else {
+                addListener(listener);
+            }
+            function listener() {
+                if (ready()) {
+                    runningTasks++;
+                    removeListener(listener);
+                    task[task.length - 1](taskCallback, results);
+                }
+            }
+        });
+    };
+
+
+
+    async.retry = function(times, task, callback) {
+        var DEFAULT_TIMES = 5;
+        var DEFAULT_INTERVAL = 0;
+
+        var attempts = [];
+
+        var opts = {
+            times: DEFAULT_TIMES,
+            interval: DEFAULT_INTERVAL
+        };
+
+        function parseTimes(acc, t){
+            if(typeof t === 'number'){
+                acc.times = parseInt(t, 10) || DEFAULT_TIMES;
+            } else if(typeof t === 'object'){
+                acc.times = parseInt(t.times, 10) || DEFAULT_TIMES;
+                acc.interval = parseInt(t.interval, 10) || DEFAULT_INTERVAL;
+            } else {
+                throw new Error('Unsupported argument type for \'times\': ' + typeof t);
+            }
+        }
+
+        var length = arguments.length;
+        if (length < 1 || length > 3) {
+            throw new Error('Invalid arguments - must be either (task), (task, callback), (times, task) or (times, task, callback)');
+        } else if (length <= 2 && typeof times === 'function') {
+            callback = task;
+            task = times;
+        }
+        if (typeof times !== 'function') {
+            parseTimes(opts, times);
+        }
+        opts.callback = callback;
+        opts.task = task;
+
+        function wrappedTask(wrappedCallback, wrappedResults) {
+            function retryAttempt(task, finalAttempt) {
+                return function(seriesCallback) {
+                    task(function(err, result){
+                        seriesCallback(!err || finalAttempt, {err: err, result: result});
+                    }, wrappedResults);
+                };
+            }
+
+            function retryInterval(interval){
+                return function(seriesCallback){
+                    setTimeout(function(){
+                        seriesCallback(null);
+                    }, interval);
+                };
+            }
+
+            while (opts.times) {
+
+                var finalAttempt = !(opts.times-=1);
+                attempts.push(retryAttempt(opts.task, finalAttempt));
+                if(!finalAttempt && opts.interval > 0){
+                    attempts.push(retryInterval(opts.interval));
+                }
+            }
+
+            async.series(attempts, function(done, data){
+                data = data[data.length - 1];
+                (wrappedCallback || opts.callback)(data.err, data.result);
+            });
+        }
+
+        // If a callback is passed, run this as a controll flow
+        return opts.callback ? wrappedTask() : wrappedTask;
+    };
+
+    async.waterfall = function (tasks, callback) {
+        callback = _once(callback || noop);
+        if (!_isArray(tasks)) {
+            var err = new Error('First argument to waterfall must be an array of functions');
+            return callback(err);
+        }
+        if (!tasks.length) {
+            return callback();
+        }
+        function wrapIterator(iterator) {
+            return _restParam(function (err, args) {
+                if (err) {
+                    callback.apply(null, [err].concat(args));
+                }
+                else {
+                    var next = iterator.next();
+                    if (next) {
+                        args.push(wrapIterator(next));
+                    }
+                    else {
+                        args.push(callback);
+                    }
+                    ensureAsync(iterator).apply(null, args);
+                }
+            });
+        }
+        wrapIterator(async.iterator(tasks))();
+    };
+
+    function _parallel(eachfn, tasks, callback) {
+        callback = callback || noop;
+        var results = _isArrayLike(tasks) ? [] : {};
+
+        eachfn(tasks, function (task, key, callback) {
+            task(_restParam(function (err, args) {
+                if (args.length <= 1) {
+                    args = args[0];
+                }
+                results[key] = args;
+                callback(err);
+            }));
+        }, function (err) {
+            callback(err, results);
+        });
+    }
+
+    async.parallel = function (tasks, callback) {
+        _parallel(async.eachOf, tasks, callback);
+    };
+
+    async.parallelLimit = function(tasks, limit, callback) {
+        _parallel(_eachOfLimit(limit), tasks, callback);
+    };
+
+    async.series = function(tasks, callback) {
+        _parallel(async.eachOfSeries, tasks, callback);
+    };
+
+    async.iterator = function (tasks) {
+        function makeCallback(index) {
+            function fn() {
+                if (tasks.length) {
+                    tasks[index].apply(null, arguments);
+                }
+                return fn.next();
+            }
+            fn.next = function () {
+                return (index < tasks.length - 1) ? makeCallback(index + 1): null;
+            };
+            return fn;
+        }
+        return makeCallback(0);
+    };
+
+    async.apply = _restParam(function (fn, args) {
+        return _restParam(function (callArgs) {
+            return fn.apply(
+                null, args.concat(callArgs)
+            );
+        });
+    });
+
+    function _concat(eachfn, arr, fn, callback) {
+        var result = [];
+        eachfn(arr, function (x, index, cb) {
+            fn(x, function (err, y) {
+                result = result.concat(y || []);
+                cb(err);
+            });
+        }, function (err) {
+            callback(err, result);
+        });
+    }
+    async.concat = doParallel(_concat);
+    async.concatSeries = doSeries(_concat);
+
+    async.whilst = function (test, iterator, callback) {
+        callback = callback || noop;
+        if (test()) {
+            var next = _restParam(function(err, args) {
+                if (err) {
+                    callback(err);
+                } else if (test.apply(this, args)) {
+                    iterator(next);
+                } else {
+                    callback(null);
+                }
+            });
+            iterator(next);
+        } else {
+            callback(null);
+        }
+    };
+
+    async.doWhilst = function (iterator, test, callback) {
+        var calls = 0;
+        return async.whilst(function() {
+            return ++calls <= 1 || test.apply(this, arguments);
+        }, iterator, callback);
+    };
+
+    async.until = function (test, iterator, callback) {
+        return async.whilst(function() {
+            return !test.apply(this, arguments);
+        }, iterator, callback);
+    };
+
+    async.doUntil = function (iterator, test, callback) {
+        return async.doWhilst(iterator, function() {
+            return !test.apply(this, arguments);
+        }, callback);
+    };
+
+    async.during = function (test, iterator, callback) {
+        callback = callback || noop;
+
+        var next = _restParam(function(err, args) {
+            if (err) {
+                callback(err);
+            } else {
+                args.push(check);
+                test.apply(this, args);
+            }
+        });
+
+        var check = function(err, truth) {
+            if (err) {
+                callback(err);
+            } else if (truth) {
+                iterator(next);
+            } else {
+                callback(null);
+            }
+        };
+
+        test(check);
+    };
+
+    async.doDuring = function (iterator, test, callback) {
+        var calls = 0;
+        async.during(function(next) {
+            if (calls++ < 1) {
+                next(null, true);
+            } else {
+                test.apply(this, arguments);
+            }
+        }, iterator, callback);
+    };
+
+    function _queue(worker, concurrency, payload) {
+        if (concurrency == null) {
+            concurrency = 1;
+        }
+        else if(concurrency === 0) {
+            throw new Error('Concurrency must not be zero');
+        }
+        function _insert(q, data, pos, callback) {
+            if (callback != null && typeof callback !== "function") {
+                throw new Error("task callback must be a function");
+            }
+            q.started = true;
+            if (!_isArray(data)) {
+                data = [data];
+            }
+            if(data.length === 0 && q.idle()) {
+                // call drain immediately if there are no tasks
+                return async.setImmediate(function() {
+                    q.drain();
+                });
+            }
+            _arrayEach(data, function(task) {
+                var item = {
+                    data: task,
+                    callback: callback || noop
+                };
+
+                if (pos) {
+                    q.tasks.unshift(item);
+                } else {
+                    q.tasks.push(item);
+                }
+
+                if (q.tasks.length === q.concurrency) {
+                    q.saturated();
+                }
+            });
+            async.setImmediate(q.process);
+        }
+        function _next(q, tasks) {
+            return function(){
+                workers -= 1;
+
+                var removed = false;
+                var args = arguments;
+                _arrayEach(tasks, function (task) {
+                    _arrayEach(workersList, function (worker, index) {
+                        if (worker === task && !removed) {
+                            workersList.splice(index, 1);
+                            removed = true;
+                        }
+                    });
+
+                    task.callback.apply(task, args);
+                });
+                if (q.tasks.length + workers === 0) {
+                    q.drain();
+                }
+                q.process();
+            };
+        }
+
+        var workers = 0;
+        var workersList = [];
+        var q = {
+            tasks: [],
+            concurrency: concurrency,
+            payload: payload,
+            saturated: noop,
+            empty: noop,
+            drain: noop,
+            started: false,
+            paused: false,
+            push: function (data, callback) {
+                _insert(q, data, false, callback);
+            },
+            kill: function () {
+                q.drain = noop;
+                q.tasks = [];
+            },
+            unshift: function (data, callback) {
+                _insert(q, data, true, callback);
+            },
+            process: function () {
+                if (!q.paused && workers < q.concurrency && q.tasks.length) {
+                    while(workers < q.concurrency && q.tasks.length){
+                        var tasks = q.payload ?
+                            q.tasks.splice(0, q.payload) :
+                            q.tasks.splice(0, q.tasks.length);
+
+                        var data = _map(tasks, function (task) {
+                            return task.data;
+                        });
+
+                        if (q.tasks.length === 0) {
+                            q.empty();
+                        }
+                        workers += 1;
+                        workersList.push(tasks[0]);
+                        var cb = only_once(_next(q, tasks));
+                        worker(data, cb);
+                    }
+                }
+            },
+            length: function () {
+                return q.tasks.length;
+            },
+            running: function () {
+                return workers;
+            },
+            workersList: function () {
+                return workersList;
+            },
+            idle: function() {
+                return q.tasks.length + workers === 0;
+            },
+            pause: function () {
+                q.paused = true;
+            },
+            resume: function () {
+                if (q.paused === false) { return; }
+                q.paused = false;
+                var resumeCount = Math.min(q.concurrency, q.tasks.length);
+                // Need to call q.process once per concurrent
+                // worker to preserve full concurrency after pause
+                for (var w = 1; w <= resumeCount; w++) {
+                    async.setImmediate(q.process);
+                }
+            }
+        };
+        return q;
+    }
+
+    async.queue = function (worker, concurrency) {
+        var q = _queue(function (items, cb) {
+            worker(items[0], cb);
+        }, concurrency, 1);
+
+        return q;
+    };
+
+    async.priorityQueue = function (worker, concurrency) {
+
+        function _compareTasks(a, b){
+            return a.priority - b.priority;
+        }
+
+        function _binarySearch(sequence, item, compare) {
+            var beg = -1,
+                end = sequence.length - 1;
+            while (beg < end) {
+                var mid = beg + ((end - beg + 1) >>> 1);
+                if (compare(item, sequence[mid]) >= 0) {
+                    beg = mid;
+                } else {
+                    end = mid - 1;
+                }
+            }
+            return beg;
+        }
+
+        function _insert(q, data, priority, callback) {
+            if (callback != null && typeof callback !== "function") {
+                throw new Error("task callback must be a function");
+            }
+            q.started = true;
+            if (!_isArray(data)) {
+                data = [data];
+            }
+            if(data.length === 0) {
+                // call drain immediately if there are no tasks
+                return async.setImmediate(function() {
+                    q.drain();
+                });
+            }
+            _arrayEach(data, function(task) {
+                var item = {
+                    data: task,
+                    priority: priority,
+                    callback: typeof callback === 'function' ? callback : noop
+                };
+
+                q.tasks.splice(_binarySearch(q.tasks, item, _compareTasks) + 1, 0, item);
+
+                if (q.tasks.length === q.concurrency) {
+                    q.saturated();
+                }
+                async.setImmediate(q.process);
+            });
+        }
+
+        // Start with a normal queue
+        var q = async.queue(worker, concurrency);
+
+        // Override push to accept second parameter representing priority
+        q.push = function (data, priority, callback) {
+            _insert(q, data, priority, callback);
+        };
+
+        // Remove unshift function
+        delete q.unshift;
+
+        return q;
+    };
+
+    async.cargo = function (worker, payload) {
+        return _queue(worker, 1, payload);
+    };
+
+    function _console_fn(name) {
+        return _restParam(function (fn, args) {
+            fn.apply(null, args.concat([_restParam(function (err, args) {
+                if (typeof console === 'object') {
+                    if (err) {
+                        if (console.error) {
+                            console.error(err);
+                        }
+                    }
+                    else if (console[name]) {
+                        _arrayEach(args, function (x) {
+                            console[name](x);
+                        });
+                    }
+                }
+            })]));
+        });
+    }
+    async.log = _console_fn('log');
+    async.dir = _console_fn('dir');
+    /*async.info = _console_fn('info');
+    async.warn = _console_fn('warn');
+    async.error = _console_fn('error');*/
+
+    async.memoize = function (fn, hasher) {
+        var memo = {};
+        var queues = {};
+        hasher = hasher || identity;
+        var memoized = _restParam(function memoized(args) {
+            var callback = args.pop();
+            var key = hasher.apply(null, args);
+            if (key in memo) {
+                async.setImmediate(function () {
+                    callback.apply(null, memo[key]);
+                });
+            }
+            else if (key in queues) {
+                queues[key].push(callback);
+            }
+            else {
+                queues[key] = [callback];
+                fn.apply(null, args.concat([_restParam(function (args) {
+                    memo[key] = args;
+                    var q = queues[key];
+                    delete queues[key];
+                    for (var i = 0, l = q.length; i < l; i++) {
+                        q[i].apply(null, args);
+                    }
+                })]));
+            }
+        });
+        memoized.memo = memo;
+        memoized.unmemoized = fn;
+        return memoized;
+    };
+
+    async.unmemoize = function (fn) {
+        return function () {
+            return (fn.unmemoized || fn).apply(null, arguments);
+        };
+    };
+
+    function _times(mapper) {
+        return function (count, iterator, callback) {
+            mapper(_range(count), iterator, callback);
+        };
+    }
+
+    async.times = _times(async.map);
+    async.timesSeries = _times(async.mapSeries);
+    async.timesLimit = function (count, limit, iterator, callback) {
+        return async.mapLimit(_range(count), limit, iterator, callback);
+    };
+
+    async.seq = function (/* functions... */) {
+        var fns = arguments;
+        return _restParam(function (args) {
+            var that = this;
+
+            var callback = args[args.length - 1];
+            if (typeof callback == 'function') {
+                args.pop();
+            } else {
+                callback = noop;
+            }
+
+            async.reduce(fns, args, function (newargs, fn, cb) {
+                fn.apply(that, newargs.concat([_restParam(function (err, nextargs) {
+                    cb(err, nextargs);
+                })]));
+            },
+            function (err, results) {
+                callback.apply(that, [err].concat(results));
+            });
+        });
+    };
+
+    async.compose = function (/* functions... */) {
+        return async.seq.apply(null, Array.prototype.reverse.call(arguments));
+    };
+
+
+    function _applyEach(eachfn) {
+        return _restParam(function(fns, args) {
+            var go = _restParam(function(args) {
+                var that = this;
+                var callback = args.pop();
+                return eachfn(fns, function (fn, _, cb) {
+                    fn.apply(that, args.concat([cb]));
+                },
+                callback);
+            });
+            if (args.length) {
+                return go.apply(this, args);
+            }
+            else {
+                return go;
+            }
+        });
+    }
+
+    async.applyEach = _applyEach(async.eachOf);
+    async.applyEachSeries = _applyEach(async.eachOfSeries);
+
+
+    async.forever = function (fn, callback) {
+        var done = only_once(callback || noop);
+        var task = ensureAsync(fn);
+        function next(err) {
+            if (err) {
+                return done(err);
+            }
+            task(next);
+        }
+        next();
+    };
+
+    function ensureAsync(fn) {
+        return _restParam(function (args) {
+            var callback = args.pop();
+            args.push(function () {
+                var innerArgs = arguments;
+                if (sync) {
+                    async.setImmediate(function () {
+                        callback.apply(null, innerArgs);
+                    });
+                } else {
+                    callback.apply(null, innerArgs);
+                }
+            });
+            var sync = true;
+            fn.apply(this, args);
+            sync = false;
+        });
+    }
+
+    async.ensureAsync = ensureAsync;
+
+    async.constant = _restParam(function(values) {
+        var args = [null].concat(values);
+        return function (callback) {
+            return callback.apply(this, args);
+        };
+    });
+
+    async.wrapSync =
+    async.asyncify = function asyncify(func) {
+        return _restParam(function (args) {
+            var callback = args.pop();
+            var result;
+            try {
+                result = func.apply(this, args);
+            } catch (e) {
+                return callback(e);
+            }
+            // if result is Promise object
+            if (_isObject(result) && typeof result.then === "function") {
+                result.then(function(value) {
+                    callback(null, value);
+                })["catch"](function(err) {
+                    callback(err.message ? err : new Error(err));
+                });
+            } else {
+                callback(null, result);
+            }
+        });
+    };
+
+    // Node.js
+    if (typeof module === 'object' && module.exports) {
+        module.exports = async;
+    }
+    // AMD / RequireJS
+    else if (typeof define === 'function' && define.amd) {
+        define([], function () {
+            return async;
+        });
+    }
+    // included directly via <script> tag
+    else {
+        root.async = async;
+    }
+
+}());
+
+}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"_process":64}],12:[function(require,module,exports){
+var EventEmitter = require('generate-js-events');
+
+/**
+ * A type assert method.
+ * @param  {Any} variable
+ * @param  {String} type
+ * @return {void}
+ */
+function assertType(variable, type) {
+    if (typeof variable !== type) {
+        throw new Error('Expected ' + type + ' but found ' + typeof variable);
+    }
+}
+
+var Bindable = EventEmitter.generate(
+    /**
+     * [Bindable description]
+     * @param {Object} data
+     */
+    function Bindable(data) {
+        var _ = this;
+
+        _.defineProperties({
+            _data: {}
+        });
+
+        for (var key in data) {
+            _._data[key] = data[key];
+        }
+    }
+);
+
+function makeGetter(property) {
+    return function getter() {
+        var _ = this;
+        return _.get(property);
+    };
+}
+
+function makeSetter(property) {
+    return function setter(val) {
+        var _ = this;
+        return _.set(property, val);
+    };
+}
+
+Bindable.generateGetters = function generateGetter(bindable, descriptor, properties) {
+    var getters = {},
+        p = properties || descriptor,
+        d = properties && descriptor;
+
+    properties = (p && typeof p === 'object') ? p : {};
+    descriptor = (d && typeof d === 'object') ? d : { enumerable: true };
+
+    for (var i = 0; i < properties.length; i++) {
+        getters[properties[i]] = {
+            get: makeGetter(properties[i])
+        };
+    }
+
+    bindable.definePrototype(descriptor, getters);
+};
+
+Bindable.generateSetters = function generateSetter(bindable, descriptor, properties) {
+    var setters = {},
+        p = properties || descriptor,
+        d = properties && descriptor;
+
+    properties = (p && typeof p === 'object') ? p : {};
+    descriptor = (d && typeof d === 'object') ? d : { enumerable: true };
+
+    for (var i = 0; i < properties.length; i++) {
+        setters[properties[i]] = {
+            set: makeSetter(properties[i])
+        };
+    }
+
+    bindable.definePrototype(descriptor, setters);
+};
+
+Bindable.generateGettersSetters = function generateGetter(bindable, descriptor, properties) {
+    var gettersSetters = {},
+        p = properties || descriptor,
+        d = properties && descriptor;
+
+    properties = (p && typeof p === 'object') ? p : [];
+    descriptor = (d && typeof d === 'object') ? d : { enumerable: true };
+
+    for (var i = 0; i < properties.length; i++) {
+        gettersSetters[properties[i]] = {
+            get: makeGetter(properties[i]),
+            set: makeSetter(properties[i])
+        };
+    }
+
+    bindable.definePrototype(descriptor, gettersSetters);
+};
+
+Bindable.definePrototype({
+    /**
+     * [get description]
+     * @param  {String} property
+     * @return {Any}
+     */
+    get: function get(property) {
+        var _ = this;
+
+        var overWrittenGetter = _['get'+property.slice(0, 1).toUpperCase()+property.slice(1)];
+        if (typeof overWrittenGetter === 'function') {
+            return overWrittenGetter.call(_);
+        }
+
+        return _._data[property];
+    },
+
+    /**
+     * [set description]
+     * @param {String} property
+     * @param {Any} newValue
+     * @param {Object} changer
+     */
+    set: function set(property, newValue, changer) {
+        changer = typeof changer === 'object' ? changer : null;
+
+        var _ = this;
+
+        var overWrittenSetter = _['set'+property.slice(0, 1).toUpperCase()+property.slice(1)];
+        if (typeof overWrittenSetter === 'function') {
+            return overWrittenSetter.call(_, newValue, changer);
+        }
+
+        var oldValue = _.get(property);
+        _._data[property] = newValue;
+
+        _.change(property, oldValue, newValue, changer);
+    },
+
+    /**
+     * [bind description]
+     * @param  {String} property
+     * @param  {Function} listener
+     * @param  {Object} observer
+     * @return {self}
+     */
+    bind: function bind(property, listener, observer) {
+        assertType(property, 'string');
+        assertType(listener, 'function');
+        assertType(observer, 'object');
+
+        var _ = this;
+
+        _.on(property, listener, observer);
+
+        var value = _.get(property);
+
+        _.__initial__ = true;
+
+        listener.call(_, value, value, false);
+
+        _.__initial__ = false;
+
+        return _;
+    },
+
+    /**
+     * [bindOnce description]
+     * @param  {String} property
+     * @param  {Function} listener
+     * @param  {Object} observer
+     * @return {self}
+     */
+    bindOnce: function bindOnce(property, listener, observer) {
+        assertType(property, 'string');
+        assertType(listener, 'function');
+        assertType(observer, 'object');
+
+        var _ = this;
+
+        _.once(property, listener, observer);
+
+        var value = _.get(property);
+
+        listener.call(_, value, value, false);
+
+        return _;
+    },
+
+    /**
+     * [unbind description]
+     * @param  {String} [property]
+     * @param  {Function} [listener]
+     * @param  {Object} [observer]
+     * @return {self}
+     */
+    unbind: function unbind(property, listener, observer) {
+        return this.off(property, listener, observer);
+    },
+
+    /**
+     * [change description]
+     * @param {String} property
+     * @param {Any} oldValue
+     * @param {Any} newValue
+     * @param {Object} changer
+     * @return {Boolean}
+     */
+    change: function change(property, oldValue, newValue, changer, object, nochaneevent) {
+        assertType(property, 'string');
+        assertType(changer, 'object');
+
+        var _ = this;
+
+        /**
+         * Creates a closure around the listener 'func' and 'args'.
+         * @param  {Function} func A listener.
+         * @return {Function}      Closure function.
+         */
+        function emitOnFunc(func) {
+            return function () {
+                func.call(_, oldValue, newValue, changer, object);
+            };
+        }
+
+        if (oldValue === newValue) return;
+
+        object = object && typeof object === 'object' ? object : _;
+
+        if (!nochaneevent) {
+            _.emit('changed', property, oldValue, newValue, changer, object);
+        }
+
+        var bindings = _.__events[property];
+
+        if (!bindings || !bindings.length) {
+            return false;
+        }
+
+        var length = bindings.length;
+
+        for (var i = 0; i < length; i++) {
+            if (!changer || bindings[i].observer !== changer) {
+                setTimeout(emitOnFunc(bindings[i].listener), 0);
+            }
+        }
+
+        return true;
+    }
+});
+
+module.exports = Bindable;
+
+},{"generate-js-events":13}],13:[function(require,module,exports){
+/**
+ * @name events.js
+ * @author Michaelangelo Jong
+ */
+
+// Dependences:
+var Generator = require('generate-js');
+
+// Generator
+var EventEmitter = Generator.generate(
+    /**
+     * Create method.
+     */
+    function EventEmitter() {
+
+        this.defineProperties(
+            {
+                configurable: false,
+                enumerable: false,
+                writable: false
+            },
+            {
+                __events: Object.create(null)
+            }
+        );
+    }
+);
+
+// Prototype
+EventEmitter.definePrototype(
+    {
+        configurable: false,
+        enumerable: false,
+        writable: false
+    },
+    {
+        /**
+         * Adds a 'listener' on 'event' to this EventEmitter instance.
+         * @param  {String} event      Name of event.
+         * @param  {Function} listener Event handler function.
+         * @param  {Object} observer Object reference for binding.
+         * @return {EventEmitter}      This EventEmitter instance.
+         */
+        on: function on(event, listener, observer) {
+            var _ = this,
+                listeners = _.__events[event];
+
+            observer = typeof observer === 'object' ? observer : null;
+
+            if (typeof event === 'string' && typeof listener === 'function') {
+                if (!(listeners instanceof Array)) {
+                    listeners = _.__events[event] = [];
+                }
+
+                listeners.push({
+                    listener: listener,
+                    observer: observer
+                });
+            }
+
+            return _;
+        },
+
+        /**
+         * Adds a 'listener' on 'event' to this EventEmitter instance which is removed after one 'event'.
+         * @param  {String} event      Name of event.
+         * @param  {Function} listener Event handler function.
+         * @param  {Object} observer Object reference for binding.
+         * @return {EventEmitter}      This EventEmitter instance.
+         */
+        once: function once(event, listener, observer) {
+            var _ = this;
+            var onceListener = function onceListener() {
+                _.off(event, onceListener);
+                listener.apply(_, arguments);
+            };
+
+            _.on(event, onceListener, observer);
+
+            return _;
+        },
+
+        /**
+         * Removes a 'listener' on 'event', or all listeners on 'event', or all listeners from this EventEmitter instance.
+         * @param  {String} event      Name of event.
+         * @param  {Function} listener Event handler function.
+         * @param  {Object} observer Object reference for binding.
+         * @return {EventEmitter}      This EventEmitter instance.
+         */
+        off: function off() {
+            var _ = this,
+                listeners,
+                i,
+                key,
+
+                event = (typeof arguments[0] === 'string') ?
+                    arguments[0] :
+                    false,
+
+                listener = (typeof arguments[0] === 'function') ?
+                    arguments[0] :
+                    (typeof arguments[1] === 'function') ?
+                        arguments[1] :
+                        false,
+
+                observer = (typeof arguments[0] === 'object') ?
+                    arguments[0] :
+                    (typeof arguments[1] === 'object') ?
+                        arguments[1] :
+                        (typeof arguments[2] === 'object') ?
+                            arguments[2] :
+                            false;
+
+            if (typeof event === 'string') {
+                listeners = _.__events[event];
+
+                if (!(listeners instanceof Array)) {
+                    return _;
+                }
+
+                if (typeof listener === 'function' && typeof observer === 'object') {
+                    for (i = listeners.length - 1; i >= 0; i--) {
+                        if (listeners[i].listener === listener && listeners[i].observer === observer) {
+                            listeners.splice(i, 1);
+                        }
+                    }
+                } else if (typeof listener === 'function' || typeof observer === 'object') {
+                    for (i = listeners.length - 1; i >= 0; i--) {
+                        if (listeners[i].listener === listener || listeners[i].observer === observer) {
+                            listeners.splice(i, 1);
+                        }
+                    }
+                } else {
+                    delete _.__events[event];
+                }
+            } else if (typeof listener === 'function' || typeof observer === 'object') {
+                for (key in _.__events) {
+                    listeners = _.__events[key];
+                    for (i = listeners.length - 1; i >= 0; i--) {
+                        if (listeners[i].listener === listener || listeners[i].observer === observer) {
+                            listeners.splice(i, 1);
+                        }
+                    }
+                }
+            } else {
+                for (key in _.__events) {
+                    delete _.__events[key];
+                }
+            }
+
+            return _;
+        },
+
+        /**
+         * Emits an 'event' with 'args' on this EventEmitter instance.
+         * @param  {String} event      Name of event.
+         * @param  {Arguments} args    Event handler function.
+         * @return {EventEmitter}      This EventEmitter instance.
+         */
+        emit: function emit(event) {
+            var _ = this,
+                args = Array.prototype.slice.call(arguments, 1),
+                i,
+                length,
+                listener,
+                listeners;
+
+            /**
+             * Creates a closure around the listener 'func' and 'args'.
+             * @param  {Function} func A listener.
+             * @return {Function}      Closure function.
+             */
+            function emitOnFunc(func) {
+                return function () {
+                    func.apply(_, args);
+                };
+            }
+
+            listeners = _.__events[event];
+            window.listeners = listeners;
+
+            if (event === 'error' && !listeners && typeof _.onerror !== 'function') {
+                if (args[0] instanceof Error){
+                    throw args[0];
+                } else {
+                    throw args;
+                }
+            }
+
+            if (typeof _['on' + event] === 'function') {
+                setTimeout(emitOnFunc(_['on' + event]), 0);
+            }
+
+            if (listeners instanceof Array) {
+                length = listeners.length;
+
+                for (i = 0; i < length; i++) {
+                    listener = listeners[i].listener;
+                    setTimeout(emitOnFunc(listener), 0);
+                }
+            }
+            return _;
+        },
+
+        /**
+         * Emits an event object containing 'eventObject' on this EventEmitter instance.
+         * @param  {String} event Name of event.
+         * @param  {Object} eventObject  Event object sent to all on handlers.
+         * @return {EventEmitter} This EventEmitter instance.
+         */
+        emitEvent: function emitEvent(event, eventObject) {
+            var _ = this,
+                timestamp = Date.now();
+
+            eventObject = typeof eventObject === 'object' ? eventObject : { data: eventObject };
+
+            eventObject.type = event;
+            eventObject.timestamp = eventObject.timeStamp || eventObject.timestamp || timestamp;
+
+            _.emit(event, eventObject);
+            return _;
+        }
+    }
+);
+
+// Exports
+module.exports = EventEmitter;
+
+},{"generate-js":14}],14:[function(require,module,exports){
+/**
+ * @name generate.js
+ * @author Michaelangelo Jong
+ */
+
+(function GeneratorScope() {
+
+// Variables
+var Creation = {},
+    Generation = {},
+    Generator = {};
+
+// Helper Methods
+
+/**
+ * Assert Error function.
+ * @param  {Boolean} condition Whether or not to throw error.
+ * @param  {String} message    Error message.
+ */
+function assertError(condition, message) {
+    if (!condition) {
+        throw new Error(message);
+    }
+}
+
+/**
+ * Assert TypeError function.
+ * @param  {Boolean} condition Whether or not to throw error.
+ * @param  {String} message    Error message.
+ */
+function assertTypeError(test, type) {
+    if (typeof test !== type) {
+        throw new TypeError('Expected \'' + type + '\' but instead found \'' + typeof test +'\'');
+    }
+}
+
+/**
+ * Returns the name of function 'func'.
+ * @param  {Function} func Any function.
+ * @return {String}        Name of 'func'.
+ */
+function getFunctionName(func) {
+    if (func.name !== void(0)) {
+        return func.name;
+    }
+    // Else use IE Shim
+    var funcNameMatch = func.toString().match(/function\s*([^\s]*)\s*\(/);
+    func.name = (funcNameMatch && funcNameMatch[1]) || '';
+    return func.name;
+}
+
+/**
+ * Returns true if 'obj' is an object containing only get and set functions, false otherwise.
+ * @param  {Any} obj Value to be tested.
+ * @return {Boolean} true or false.
+ */
+function isGetSet(obj) {
+    var keys, length;
+    if (obj && typeof obj === 'object') {
+        keys = Object.getOwnPropertyNames(obj).sort();
+        length = keys.length;
+
+        if ((length === 1 && (keys[0] === 'get' && typeof obj.get === 'function' ||
+                              keys[0] === 'set' && typeof obj.set === 'function')) ||
+            (length === 2 && (keys[0] === 'get' && typeof obj.get === 'function' &&
+                              keys[1] === 'set' && typeof obj.set === 'function'))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Defines properties on 'obj'.
+ * @param  {Object} obj        An object that 'properties' will be attached to.
+ * @param  {Object} descriptor Optional object descriptor that will be applied to all attaching properties on 'properties'.
+ * @param  {Object} properties An object who's properties will be attached to 'obj'.
+ * @return {Generator}         'obj'.
+ */
+function defineObjectProperties(obj, descriptor, properties) {
+    var setProperties = {},
+        i,
+        keys,
+        length,
+
+        p = properties || descriptor,
+        d = properties && descriptor;
+
+    properties = (p && typeof p === 'object') ? p : {};
+    descriptor = (d && typeof d === 'object') ? d : {};
+
+    keys = Object.getOwnPropertyNames(properties);
+    length = keys.length;
+
+    for (i = 0; i < length; i++) {
+        if (isGetSet(properties[keys[i]])) {
+            setProperties[keys[i]] = {
+                configurable: !!descriptor.configurable,
+                enumerable: !!descriptor.enumerable,
+                get: properties[keys[i]].get,
+                set: properties[keys[i]].set
+            };
+        } else {
+            setProperties[keys[i]] = {
+                configurable: !!descriptor.configurable,
+                enumerable: !!descriptor.enumerable,
+                writable: !!descriptor.writable,
+                value: properties[keys[i]]
+            };
+        }
+    }
+    Object.defineProperties(obj, setProperties);
+    return obj;
+}
+
+// Creation Class
+defineObjectProperties(
+    Creation,
+    {
+        configurable: false,
+        enumerable: false,
+        writable: false
+    },
+    {
+        /**
+         * Defines properties on this object.
+         * @param  {Object} descriptor Optional object descriptor that will be applied to all attaching properties.
+         * @param  {Object} properties An object who's properties will be attached to this object.
+         * @return {Object}            This object.
+         */
+        defineProperties: function defineProperties(descriptor, properties) {
+            defineObjectProperties(this, descriptor, properties);
+            return this;
+        },
+
+        /**
+         * returns the prototype of `this` Creation.
+         * @return {Object} Prototype of `this` Creation.
+         */
+        getProto: function getProto() {
+            return Object.getPrototypeOf(this);
+        },
+
+        /**
+         * returns the prototype of `this` super Creation.
+         * @return {Object} Prototype of `this` super Creation.
+         */
+        getSuper: function getSuper() {
+            return Object.getPrototypeOf(this.generator).proto;
+            // return Object.getPrototypeOf(Object.getPrototypeOf(this));
+        }
+    }
+);
+
+// Generation Class
+defineObjectProperties(
+    Generation,
+    {
+        configurable: false,
+        enumerable: false,
+        writable: false
+    },
+    {
+        name: 'Generation',
+
+        proto: Creation,
+
+        /**
+         * Creates a new instance of this Generator.
+         * @return {Generator} Instance of this Generator.
+         */
+        create: function create() {
+            var _ = this,
+                newObj = Object.create(_.proto);
+
+            _.__supercreate(newObj, arguments);
+
+            return newObj;
+        },
+
+        __supercreate: function __supercreate(newObj, args) {
+            var _ = this,
+                superGenerator = Object.getPrototypeOf(_),
+                supercreateCalled = false;
+
+            newObj.supercreate = function supercreate() {
+
+                supercreateCalled = true;
+
+                if (Generation.isGeneration(superGenerator)){
+                    superGenerator.__supercreate(newObj, arguments);
+                }
+            };
+
+            _.__create.apply(newObj, args);
+
+            if (!supercreateCalled) {
+                newObj.supercreate();
+            }
+
+            delete newObj.supercreate;
+        },
+
+        __create: function () {},
+
+        /**
+         * Generates a new generator that inherits from `this` generator.
+         * @param {Generator} ParentGenerator Generator to inherit from.
+         * @param {Function} create           Create method that gets called when creating a new instance of new generator.
+         * @return {Generator}                New Generator that inherits from 'ParentGenerator'.
+         */
+        generate: function generate(create) {
+            var _ = this;
+
+            assertError(Generation.isGeneration(_) || _ === Generation, 'Cannot call method \'generate\' on non-Generations.');
+            assertTypeError(create, 'function');
+
+            var newGenerator = Object.create(_),
+                newProto     = Object.create(_.proto);
+
+            defineObjectProperties(
+                newProto,
+                {
+                    configurable: false,
+                    enumerable: false,
+                    writable: false
+                },
+                {
+                    generator: newGenerator
+                }
+            );
+
+            defineObjectProperties(
+                newGenerator,
+                {
+                    configurable: false,
+                    enumerable: false,
+                    writable: false
+                },
+                {
+                    name: getFunctionName(create),
+                    proto: newProto,
+                    __create: create
+                }
+            );
+
+            return newGenerator;
+        },
+
+        /**
+         * Returns true if 'generator' was generated by this Generator.
+         * @param  {Generator} generator A Generator.
+         * @return {Boolean}             true or false.
+         */
+        isGeneration: function isGeneration(generator) {
+            var _ = this;
+            return _.isPrototypeOf(generator);
+        },
+
+        /**
+         * Returns true if 'object' was created by this Generator.
+         * @param  {Object} object An Object.
+         * @return {Boolean}       true or false.
+         */
+        isCreation: function isCreation(object) {
+            var _ = this;
+            return _.proto.isPrototypeOf(object);
+        },
+
+        /**
+         * Defines shared properties for all objects created by this generator.
+         * @param  {Object} descriptor Optional object descriptor that will be applied to all attaching properties.
+         * @param  {Object} properties An object who's properties will be attached to this generator's prototype.
+         * @return {Generator}         This generator.
+         */
+        definePrototype: function definePrototype(descriptor, properties) {
+            defineObjectProperties(this.proto, descriptor, properties);
+            return this;
+        },
+
+        /**
+         * Generator.toString method.
+         * @return {String} A string representation of this generator.
+         */
+        toString: function toString() {
+            return '[' + (this.name || 'generation') + ' Generator]';
+        }
+    }
+);
+
+// Generator Class Methods
+defineObjectProperties(
+    Generator,
+    {
+        configurable: false,
+        enumerable: false,
+        writable: false
+    },
+    {
+        /**
+         * Generates a new generator that inherits from `this` generator.
+         * @param {Generator} ParentGenerator Generator to inherit from.
+         * @param {Function} create           Create method that gets called when creating a new instance of new generator.
+         * @return {Generator}                New Generator that inherits from 'ParentGenerator'.
+         */
+        generate: function generate (create) {
+            return Generation.generate(create);
+        },
+
+        /**
+         * Returns true if 'generator' was generated by this Generator.
+         * @param  {Generator} generator A Generator.
+         * @return {Boolean}             true or false.
+         */
+        isGenerator: function isGenerator (generator) {
+            return Generation.isGeneration(generator);
+        },
+
+        /**
+         * [toGenerator description]
+         * @param  {Function} constructor A constructor function.
+         * @return {Generator}            A new generator who's create method is `constructor` and inherits from `constructor.prototype`.
+         */
+        toGenerator: function toGenerator(constructor) {
+
+            assertTypeError(constructor, 'function');
+
+            var newGenerator = Object.create(Generation),
+                newProto     = Object.create(constructor.prototype);
+
+            defineObjectProperties(
+                newProto,
+                {
+                    configurable: false,
+                    enumerable: false,
+                    writable: false
+                },
+                {
+                    generator: newGenerator
+                }
+            );
+
+            defineObjectProperties(
+                newProto,
+                {
+                    configurable: false,
+                    enumerable: false,
+                    writable: false
+                },
+                Creation
+            );
+
+            defineObjectProperties(
+                newGenerator,
+                {
+                    configurable: false,
+                    enumerable: false,
+                    writable: false
+                },
+                {
+                    name: getFunctionName(constructor),
+                    proto: newProto,
+                    __create: constructor
+                }
+            );
+
+            return newGenerator;
+        }
+    }
+);
+
+Object.freeze(Creation);
+Object.freeze(Generation);
+Object.freeze(Generator);
+
+// Exports
+if (typeof define === 'function' && define.amd) {
+    // AMD
+    define(function() {
+        return Generator;
+    });
+} else if (typeof module === 'object' && typeof exports === 'object') {
+    // Node/CommonJS
+    module.exports = Generator;
+} else {
+    // Browser global
+    window.Generator = Generator;
+}
+
+}());
+
+},{}],15:[function(require,module,exports){
+module.exports = require('./lib/custom-element');
+
+},{"./lib/custom-element":16}],16:[function(require,module,exports){
+var Bindable = require('generate-js-bindings'),
+    Bars = require('bars'),
+    globalBars = Bars.create();
+
+function attach(config) {
+    var _ = this,
+        klass = config.class,
+        proto = config.proto,
+        key;
+
+    delete config.proto;
+    delete config.class;
+
+    _.registerConfig(config);
+
+    for (key in klass) {
+        _[key] = klass[key];
+    }
+
+    _.definePrototype({
+        writable: true,
+        configurable: true
+    }, proto);
+
+    config.class = klass;
+    config.proto = proto;
+}
+
+function registerConfig(config) {
+    var _ = this,
+        templates = config.templates,
+        partials = config.partials,
+        helpers = config.helpers,
+        blocks = config.blocks,
+        interactions = config.interactions,
+        key;
+
+    delete config.templates;
+    delete config.partials;
+    delete config.helpers;
+    delete config.blocks;
+    delete config.interactions;
+
+    if (templates) {
+        for (key in templates) {
+            _.proto.templates[key] = globalBars.parse(templates[key]);
+        }
+    }
+
+    if (partials) {
+        for (key in partials) {
+            _.proto.partials[key] = globalBars.parse(partials[key]);
+        }
+    }
+
+    if (helpers) {
+        for (key in helpers) {
+            _.proto.helpers[key] = helpers[key];
+        }
+    }
+
+    if (blocks) {
+        for (key in blocks) {
+            _.proto.blocks[key] = blocks[key];
+        }
+    }
+
+    if (interactions) {
+        for (key in interactions) {
+            _.proto.interactions[key] = interactions[key];
+        }
+    }
+
+    _.definePrototype({
+        writable: true,
+        enumerable: true,
+        configurable: true
+    }, config);
+
+    config.templates = templates;
+    config.partials = partials;
+    config.helpers = helpers;
+    config.blocks = blocks;
+    config.interactions = interactions;
+}
+
+function registerBars(_) {
+    var key;
+
+    for (key in _.partials) {
+        if (!_.Bars.partials[key]) {
+            _.Bars.partials[key] = _.Bars.build(_.partials[key]);
+        }
+    }
+
+    for (key in _.templates) {
+        if (!_.templates[key].bars) {
+            _.templates[key] = _.Bars.build(_.templates[key]);
+        }
+    }
+
+    for (key in _.helpers) {
+        if (!_.helpers[key].bars) {
+            _.Bars.helpers[key] = _.helpers[key];
+        }
+    }
+
+    for (key in _.blocks) {
+        if (!_.blocks[key].bars) {
+            _.Bars.blocks[key] = _.blocks[key];
+        }
+    }
+}
+
+function createElement(config, constructor) {
+    var _ = this,
+        el = _.generate(constructor);
+
+    el.definePrototype({
+        templates: Object.create(_.proto.templates),
+        helpers: Object.create(_.proto.helpers),
+        blocks: Object.create(_.proto.blocks),
+        partials: Object.create(_.proto.partials),
+        interactions: Object.create(_.proto.interactions)
+    });
+
+    el.createElement = createElement;
+    el.registerConfig = registerConfig;
+    el.attach = attach;
+
+    el.registerConfig(config);
+
+    return el;
+}
+
+var CustomElement = Bindable.generate(function CustomElement(options) {
+    options = options || {};
+
+    var _ = this,
+        $element = $(options.$element);
+
+    _.supercreate(options);
+
+    _.$element = $element.length ? $element : $('<div>');
+
+    _.Bars = Bars.create();
+
+    registerBars(_);
+
+    _.registerInteractions(_.interactions);
+
+    _.defineProperties({
+        templates: Object.create(_.templates)
+    });
+
+    _.render();
+});
+
+CustomElement.createElement = createElement;
+
+CustomElement.definePrototype({
+    templates: {},
+    helpers: {},
+    blocks: {},
+    partials: {},
+    interactions: {}
+});
+
+CustomElement.definePrototype({
+    update: function(data) {
+        var _ = this;
+        _.dom.update(data || _._data);
+    },
+
+    dispose: function dispose() {
+        var _ = this;
+        _.$element.off();
+        _.$element.empty();
+    },
+
+    render: function render(template) {
+        var _ = this;
+
+        template = typeof template === 'string' ? _.templates[template] : _.templates.index;
+
+        if (template && typeof template.render === 'function') {
+            _.$element.empty();
+            _.dom = template.render(_._data);
+            _.dom.appendTo(_.$element[0]);
+            _.dom.update(_._data);
+        } else {
+            _.emit('error', new Error('Failed to render: Invalid template.'));
+        }
+    }
+});
+
+CustomElement.definePrototype({
+    __eventListener: function eventListener(interaction) {
+        var _ = this;
+
+        return function (event) {
+            return interaction.listener.call(_, event, $(this));
+        };
+    },
+
+    registerInteractions: function registerInteractions(interactions) {
+        var _ = this,
+            interaction, key;
+
+        for (key in interactions) {
+            interaction = interactions[key];
+
+            if (interaction.target) {
+                _.$element.on(interaction.event, interaction.target, _.__eventListener(interaction));
+            } else {
+                _.$element.on(interaction.event, _.__eventListener(interaction));
+            }
+        }
+    },
+
+    registerTemplates: function registerTemplates(templates) {
+        var _ = this,
+            key;
+
+        for (key in templates) {
+            _.templates[name] = _.Bars.key( templates[key] );
+        }
+    },
+
+    registerBlocks: function registerBlocks(blocks) {
+        var _ = this,
+            key;
+
+        for (key in blocks) {
+            _.Bars.registerBlock(key, blocks[key]);
+        }
+    },
+
+    registerPartials: function registerPartials(partials) {
+        var _ = this,
+            key;
+
+        for (key in partials) {
+            _.Bars.registerPartial(key, partials[key]);
+        }
+    },
+
+    registerHelpers: function registerHelpers(helpers) {
+        var _ = this,
+            key;
+
+        for (key in helpers) {
+            _.Bars.registerHelper(key, helpers[key]);
+        }
+    },
+});
+
+if (window && !module.parent) window.CustomElement = CustomElement;
+module.exports = CustomElement;
+
+},{"bars":17,"generate-js-bindings":12}],17:[function(require,module,exports){
 module.exports = require('./lib');
 
-},{"./lib":6}],2:[function(require,module,exports){
+},{"./lib":22}],18:[function(require,module,exports){
 var Generator = require('generate-js'),
     Parser = require('./parser'),
     Renderer = require('./renderer'),
@@ -54,7 +2863,7 @@ Bars.definePrototype({
 
 module.exports = window.Bars = Bars;
 
-},{"./blocks":3,"./helpers":5,"./parser":7,"./renderer":8,"generate-js":9}],3:[function(require,module,exports){
+},{"./blocks":19,"./helpers":21,"./parser":23,"./renderer":24,"generate-js":25}],19:[function(require,module,exports){
 var Generator = require('generate-js');
 
 var Blocks = Generator.generate(function Blocks() {});
@@ -133,7 +2942,7 @@ Blocks.definePrototype({
 
 module.exports = Blocks;
 
-},{"generate-js":9}],4:[function(require,module,exports){
+},{"generate-js":25}],20:[function(require,module,exports){
 var Generator = require('generate-js'),
     Nodes = {},
     ARRAY = [];
@@ -641,7 +3450,7 @@ Nodes.FRAG.definePrototype({
 
 module.exports = Nodes.FRAG;
 
-},{"generate-js":9}],5:[function(require,module,exports){
+},{"generate-js":25}],21:[function(require,module,exports){
 var Generator = require('generate-js');
 
 var Helpers = Generator.generate(function Helpers() {});
@@ -654,10 +3463,10 @@ Helpers.definePrototype({
 
 module.exports = Helpers;
 
-},{"generate-js":9}],6:[function(require,module,exports){
+},{"generate-js":25}],22:[function(require,module,exports){
 module.exports = require('./bars');
 
-},{"./bars":2}],7:[function(require,module,exports){
+},{"./bars":18}],23:[function(require,module,exports){
 if (!String.prototype.codePointAt) {
     String.prototype.codePointAt = function (pos) {
         pos = isNaN(pos) ? 0 : pos;
@@ -1974,7 +4783,7 @@ function compile(buffer) {
 
 module.exports = compile;
 
-},{}],8:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
 var Generator = require('generate-js'),
     Frag = require('./frag');
 
@@ -1996,409 +4805,13 @@ Renderer.definePrototype({
 
 module.exports = Renderer;
 
-},{"./frag":4,"generate-js":9}],9:[function(require,module,exports){
-/**
- * @name generate.js
- * @author Michaelangelo Jong
- */
-
-(function GeneratorScope() {
-
-// Variables
-var Creation = {},
-    Generation = {},
-    Generator = {};
-
-// Helper Methods
-
-/**
- * Assert Error function.
- * @param  {Boolean} condition Whether or not to throw error.
- * @param  {String} message    Error message.
- */
-function assertError(condition, message) {
-    if (!condition) {
-        throw new Error(message);
-    }
-}
-
-/**
- * Assert TypeError function.
- * @param  {Boolean} condition Whether or not to throw error.
- * @param  {String} message    Error message.
- */
-function assertTypeError(test, type) {
-    if (typeof test !== type) {
-        throw new TypeError('Expected \'' + type + '\' but instead found \'' + typeof test +'\'');
-    }
-}
-
-/**
- * Returns the name of function 'func'.
- * @param  {Function} func Any function.
- * @return {String}        Name of 'func'.
- */
-function getFunctionName(func) {
-    if (func.name !== void(0)) {
-        return func.name;
-    }
-    // Else use IE Shim
-    var funcNameMatch = func.toString().match(/function\s*([^\s]*)\s*\(/);
-    func.name = (funcNameMatch && funcNameMatch[1]) || '';
-    return func.name;
-}
-
-/**
- * Returns true if 'obj' is an object containing only get and set functions, false otherwise.
- * @param  {Any} obj Value to be tested.
- * @return {Boolean} true or false.
- */
-function isGetSet(obj) {
-    var keys, length;
-    if (obj && typeof obj === 'object') {
-        keys = Object.getOwnPropertyNames(obj).sort();
-        length = keys.length;
-
-        if ((length === 1 && (keys[0] === 'get' && typeof obj.get === 'function' ||
-                              keys[0] === 'set' && typeof obj.set === 'function')) ||
-            (length === 2 && (keys[0] === 'get' && typeof obj.get === 'function' &&
-                              keys[1] === 'set' && typeof obj.set === 'function'))) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Defines properties on 'obj'.
- * @param  {Object} obj        An object that 'properties' will be attached to.
- * @param  {Object} descriptor Optional object descriptor that will be applied to all attaching properties on 'properties'.
- * @param  {Object} properties An object who's properties will be attached to 'obj'.
- * @return {Generator}         'obj'.
- */
-function defineObjectProperties(obj, descriptor, properties) {
-    var setProperties = {},
-        i,
-        keys,
-        length;
-
-    if (!descriptor || typeof descriptor !== 'object') {
-        descriptor = {};
-    }
-
-    if (!properties || typeof properties !== 'object') {
-        properties = descriptor;
-        descriptor = {};
-    }
-
-    keys = Object.getOwnPropertyNames(properties);
-    length = keys.length;
-
-    for (i = 0; i < length; i++) {
-        if (isGetSet(properties[keys[i]])) {
-            setProperties[keys[i]] = {
-                configurable: !!descriptor.configurable,
-                enumerable: !!descriptor.enumerable,
-                get: properties[keys[i]].get,
-                set: properties[keys[i]].set
-            };
-        } else {
-            setProperties[keys[i]] = {
-                configurable: !!descriptor.configurable,
-                enumerable: !!descriptor.enumerable,
-                writable: !!descriptor.writable,
-                value: properties[keys[i]]
-            };
-        }
-    }
-    Object.defineProperties(obj, setProperties);
-    return obj;
-}
-
-// Creation Class
-defineObjectProperties(
-    Creation,
-    {
-        configurable: false,
-        enumerable: false,
-        writable: false
-    },
-    {
-        /**
-         * Defines properties on this object.
-         * @param  {Object} descriptor Optional object descriptor that will be applied to all attaching properties.
-         * @param  {Object} properties An object who's properties will be attached to this object.
-         * @return {Object}            This object.
-         */
-        defineProperties: function defineProperties(descriptor, properties) {
-            defineObjectProperties(this, descriptor, properties);
-            return this;
-        },
-
-        /**
-         * returns the prototype of `this` Creation.
-         * @return {Object} Prototype of `this` Creation.
-         */
-        getProto: function getProto() {
-            return Object.getPrototypeOf(this);
-        },
-
-        /**
-         * returns the prototype of `this` super Creation.
-         * @return {Object} Prototype of `this` super Creation.
-         */
-        getSuper: function getSuper() {
-            return Object.getPrototypeOf(this.generator).proto;
-            // return Object.getPrototypeOf(Object.getPrototypeOf(this));
-        }
-    }
-);
-
-// Generation Class
-defineObjectProperties(
-    Generation,
-    {
-        configurable: false,
-        enumerable: false,
-        writable: false
-    },
-    {
-        name: 'Generation',
-
-        proto: Creation,
-
-        /**
-         * Creates a new instance of this Generator.
-         * @return {Generator} Instance of this Generator.
-         */
-        create: function create() {
-            var _ = this,
-                newObj = Object.create(_.proto);
-
-            _.__supercreate(newObj, arguments);
-
-            return newObj;
-        },
-
-        __supercreate: function __supercreate(newObj, args) {
-            var _ = this,
-                superGenerator = Object.getPrototypeOf(_),
-                supercreateCalled = false;
-
-            newObj.supercreate = function supercreate() {
-
-                supercreateCalled = true;
-
-                if (Generation.isGeneration(superGenerator)){
-                    superGenerator.__supercreate(newObj, arguments);
-                }
-            };
-
-            _.__create.apply(newObj, args);
-
-            if (!supercreateCalled) {
-                newObj.supercreate();
-            }
-
-            delete newObj.supercreate;
-        },
-
-        __create: function () {},
-
-        /**
-         * Generates a new generator that inherits from `this` generator.
-         * @param {Generator} ParentGenerator Generator to inherit from.
-         * @param {Function} create           Create method that gets called when creating a new instance of new generator.
-         * @return {Generator}                New Generator that inherits from 'ParentGenerator'.
-         */
-        generate: function generate(create) {
-            var _ = this;
-
-            assertError(Generation.isGeneration(_) || _ === Generation, 'Cannot call method \'generate\' on non-Generations.');
-            assertTypeError(create, 'function');
-
-            var newGenerator = Object.create(_),
-                newProto     = Object.create(_.proto);
-
-            defineObjectProperties(
-                newProto,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                {
-                    generator: newGenerator
-                }
-            );
-
-            defineObjectProperties(
-                newGenerator,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                {
-                    name: getFunctionName(create),
-                    proto: newProto,
-                    __create: create
-                }
-            );
-
-            return newGenerator;
-        },
-
-        /**
-         * Returns true if 'generator' was generated by this Generator.
-         * @param  {Generator} generator A Generator.
-         * @return {Boolean}             true or false.
-         */
-        isGeneration: function isGeneration(generator) {
-            var _ = this;
-            return _.isPrototypeOf(generator);
-        },
-
-        /**
-         * Returns true if 'object' was created by this Generator.
-         * @param  {Object} object An Object.
-         * @return {Boolean}       true or false.
-         */
-        isCreation: function isCreation(object) {
-            var _ = this;
-            return _.proto.isPrototypeOf(object);
-        },
-
-        /**
-         * Defines shared properties for all objects created by this generator.
-         * @param  {Object} descriptor Optional object descriptor that will be applied to all attaching properties.
-         * @param  {Object} properties An object who's properties will be attached to this generator's prototype.
-         * @return {Generator}         This generator.
-         */
-        definePrototype: function definePrototype(descriptor, properties) {
-            defineObjectProperties(this.proto, descriptor, properties);
-            return this;
-        },
-
-        /**
-         * Generator.toString method.
-         * @return {String} A string representation of this generator.
-         */
-        toString: function toString() {
-            return '[' + (this.name || 'generation') + ' Generator]';
-        }
-    }
-);
-
-// Generator Class Methods
-defineObjectProperties(
-    Generator,
-    {
-        configurable: false,
-        enumerable: false,
-        writable: false
-    },
-    {
-        /**
-         * Generates a new generator that inherits from `this` generator.
-         * @param {Generator} ParentGenerator Generator to inherit from.
-         * @param {Function} create           Create method that gets called when creating a new instance of new generator.
-         * @return {Generator}                New Generator that inherits from 'ParentGenerator'.
-         */
-        generate: function generate (create) {
-            return Generation.generate(create);
-        },
-
-        /**
-         * Returns true if 'generator' was generated by this Generator.
-         * @param  {Generator} generator A Generator.
-         * @return {Boolean}             true or false.
-         */
-        isGenerator: function isGenerator (generator) {
-            return Generation.isGeneration(generator);
-        },
-
-        /**
-         * [toGenerator description]
-         * @param  {Function} constructor A constructor function.
-         * @return {Generator}            A new generator who's create method is `constructor` and inherits from `constructor.prototype`.
-         */
-        toGenerator: function toGenerator(constructor) {
-
-            assertTypeError(constructor, 'function');
-
-            var newGenerator = Object.create(Generation),
-                newProto     = Object.create(constructor.prototype);
-
-            defineObjectProperties(
-                newProto,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                {
-                    generator: newGenerator
-                }
-            );
-
-            defineObjectProperties(
-                newProto,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                Creation
-            );
-
-            defineObjectProperties(
-                newGenerator,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                {
-                    name: getFunctionName(constructor),
-                    proto: newProto,
-                    __create: constructor
-                }
-            );
-
-            return newGenerator;
-        }
-    }
-);
-
-Object.freeze(Creation);
-Object.freeze(Generation);
-Object.freeze(Generator);
-
-// Exports
-if (typeof define === 'function' && define.amd) {
-    // AMD
-    define(function() {
-        return Generator;
-    });
-} else if (typeof module === 'object' && typeof exports === 'object') {
-    // Node/CommonJS
-    module.exports = Generator;
-} else {
-    // Browser global
-    window.Generator = Generator;
-}
-
-}());
-
-},{}],10:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"./frag":20,"generate-js":25}],25:[function(require,module,exports){
+arguments[4][14][0].apply(exports,arguments)
+},{"dup":14}],26:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/accounts/billing.bars')
-        },
-        partials: {
-            'accounts-bar': require('../../views/accounts/accounts-bar.bars')
         }
     };
 
@@ -2412,14 +4825,11 @@ AccountsBilling.definePrototype({
 
 module.exports = AccountsBilling;
 
-},{"../../utils/route":28,"../../views/accounts/accounts-bar.bars":31,"../../views/accounts/billing.bars":32}],11:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/accounts/billing.bars":46,"/Users/dread/Apps/bars-app":1}],27:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/accounts/edit.bars')
-        },
-        partials: {
-            'accounts-bar': require('../../views/accounts/accounts-bar.bars')
         }
     };
 
@@ -2433,8 +4843,38 @@ AccountsEdit.definePrototype({
 
 module.exports = AccountsEdit;
 
-},{"../../utils/route":28,"../../views/accounts/accounts-bar.bars":31,"../../views/accounts/edit.bars":33}],12:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/accounts/edit.bars":47,"/Users/dread/Apps/bars-app":1}],28:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
+    config = {
+        templates: {
+            index: require('../../views/accounts/index.bars')
+        },
+        partials: {
+            'accounts-bar': require('../../views/accounts/accounts-bar.bars')
+        }
+    };
+
+var AccountsIndex = Route.createElement(config, function AccountsIndex(options) {
+    var _ = this;
+    _.supercreate(options);
+});
+
+AccountsIndex.definePrototype({
+    beforeLoad: function beforeLoad(done) {
+        var _ = this;
+
+        if (_.app.currentRoute === _) {
+            return done( _.path + '/edit' );
+        }
+
+        done();
+    }
+});
+
+module.exports = AccountsIndex;
+
+},{"../../views/accounts/accounts-bar.bars":45,"../../views/accounts/index.bars":48,"/Users/dread/Apps/bars-app":1}],29:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/accounts/sign-in.bars')
@@ -2451,8 +4891,8 @@ AccountsSignIn.definePrototype({
 
 module.exports = AccountsSignIn;
 
-},{"../../utils/route":28,"../../views/accounts/sign-in.bars":34}],13:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/accounts/sign-in.bars":49,"/Users/dread/Apps/bars-app":1}],30:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/accounts/sign-up.bars')
@@ -2469,14 +4909,11 @@ AccountsSignUp.definePrototype({
 
 module.exports = AccountsSignUp;
 
-},{"../../utils/route":28,"../../views/accounts/sign-up.bars":35}],14:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/accounts/sign-up.bars":50,"/Users/dread/Apps/bars-app":1}],31:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/accounts/users.bars')
-        },
-        partials: {
-            'accounts-bar': require('../../views/accounts/accounts-bar.bars')
         }
     };
 
@@ -2490,9 +4927,8 @@ AccountsUsers.definePrototype({
 
 module.exports = AccountsUsers;
 
-},{"../../utils/route":28,"../../views/accounts/accounts-bar.bars":31,"../../views/accounts/users.bars":36}],15:[function(require,module,exports){
-var Router = require('../../utils/router'),
-    Bindable = require('generate-js-bindings'),
+},{"../../views/accounts/users.bars":51,"/Users/dread/Apps/bars-app":1}],32:[function(require,module,exports){
+var Router = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/application/index.bars')
@@ -2504,96 +4940,72 @@ var Router = require('../../utils/router'),
             outlet: function(a) {
                 return a;
             }
-        },
-        interactions: {
-            activeToggle: {
-                event: window.$.browser.event('click'),
-                target: '.toggler',
-                listener: function listener(e, $el) {
-                    var _ = this,
-                        splat = $el.attr('data-attr').split('/'),
-                        obj = _.currentRoute,
-                        lastIndex = splat.length - 1;
-
-                    for (var i = 0; i < splat.length; i++) {
-                        if (typeof obj[splat[i]] === 'undefined') return;
-
-                        if (i === lastIndex) {
-                            obj[splat[i]] = !obj[splat[i]];
-                        } else {
-                            obj = obj[splat[i]];
-                        }
-                    }
-
-                    _.currentRoute.update();
-                }
-            }
         }
     };
 
 var App = Router.createElement(config, function App(options) {
     var _ = this;
 
-    _.defineProperties({
-        routes: require('./routes')
-    });
-
-
     _.supercreate(options);
     _.set('cta', {
-        id: '123',
-        active: false,
-        name: 'Lively Chat'
+        name: 'Lively Chat',
+        id: 123,
+        active: false
     });
-    _.update();
-    _.currentRoute.update();
 });
 
-Bindable.generateGettersSetters(App, ['cta']);
-
 App.definePrototype({
-    loading: function loading() {
+    beforeLoad: function beforeLoad(done) {
         var _ = this;
-        _.$element.addClass('loading');
+
+        if (_.app.currentRoute === _) {
+            return done( _.path + 'conversations' );
+        }
+
+        // _.$element.addClass('loading');
+        done();
     },
 
-    unloading: function unloading() {
+    afterLoad: function afterLoad(done) {
         var _ = this;
         // _.$element.removeClass('loading');
+        done();
     }
 });
 
 module.exports = App;
 
-},{"../../utils/router":29,"../../views/application/index.bars":38,"../../views/application/top-bar.bars":39,"./routes":16,"generate-js-bindings":51}],16:[function(require,module,exports){
+},{"../../views/application/index.bars":53,"../../views/application/top-bar.bars":54,"/Users/dread/Apps/bars-app":1}],33:[function(require,module,exports){
 module.exports = {
-    '/ctas/:id': require('../ctas/show'),
-    '/ctas/:id/appearance': require('../ctas/appearance'),
-    '/ctas/:id/schedule': require('../ctas/schedule'),
-    '/ctas/:id/triggers': require('../ctas/triggers'),
-    '/ctas/:id/settings': require('../ctas/settings'),
+    '/ctas/:cta_id': require('../ctas'),
+    '/ctas/:cta_id/dashboard': require('../ctas/show'),
+    // '/ctas/:cta_id/appearance': require('../ctas/appearance'),
+    '/ctas/:cta_id/schedule': require('../ctas/schedule'),
+    '/ctas/:cta_id/triggers': require('../ctas/triggers'),
+    '/ctas/:cta_id/triggers/:trigger_id': require('../ctas/triggers'),
+    '/ctas/:cta_id/settings': require('../ctas/settings'),
 
     '/conversations': require('../conversations'),
     '/people': require('../people'),
     '/help': require('../help'),
 
+    '/accounts': require('../accounts'),
     '/accounts/edit': require('../accounts/edit'),
     '/accounts/users': require('../accounts/users'),
     '/accounts/billing': require('../accounts/billing'),
     '/accounts/sign-in': require('../accounts/sign-in'),
     '/accounts/sign-up': require('../accounts/sign-up'),
 
-    '/': require('../conversations')
+    '/': require('../application')
 };
 
-},{"../accounts/billing":10,"../accounts/edit":11,"../accounts/sign-in":12,"../accounts/sign-up":13,"../accounts/users":14,"../conversations":17,"../ctas/appearance":18,"../ctas/schedule":19,"../ctas/settings":20,"../ctas/show":21,"../ctas/triggers":22,"../help":23,"../people":24}],17:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../accounts":28,"../accounts/billing":26,"../accounts/edit":27,"../accounts/sign-in":29,"../accounts/sign-up":30,"../accounts/users":31,"../application":32,"../conversations":34,"../ctas":35,"../ctas/schedule":36,"../ctas/settings":37,"../ctas/show":38,"../ctas/triggers":39,"../help":40,"../people":41}],34:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/conversations/index.bars')
         },
         partials: {
-            'top-bar': require('../../views/application/top-bar.bars'),
             'filters': require('../../views/application/filters.bars')
         }
     };
@@ -2608,43 +5020,73 @@ ConversationsIndex.definePrototype({
 
 module.exports = ConversationsIndex;
 
-},{"../../utils/route":28,"../../views/application/filters.bars":37,"../../views/application/top-bar.bars":39,"../../views/conversations/index.bars":40}],18:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/application/filters.bars":52,"../../views/conversations/index.bars":55,"/Users/dread/Apps/bars-app":1}],35:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
-            index: require('../../views/ctas/appearance.bars')
+            index: require('../../views/ctas/index.bars')
         },
         partials: {
             'cta-bar': require('../../views/ctas/cta-bar.bars')
+        },
+        interactions: {
+            activeToggle: {
+                event: window.$.browser.event('click'),
+                target: '.toggler',
+                listener: function listener(e, $el) {
+                    var _ = this,
+                        splat = $el.attr('data-attr').split('/'),
+                        obj = _,
+                        lastIndex = splat.length - 1;
+
+                    for (var i = 0; i < splat.length; i++) {
+                        if (i === lastIndex) {
+                            obj[splat[i]] = !obj[splat[i]];
+                        } else if (typeof obj[splat[i]] === 'undefined') {
+                            return;
+                        } else {
+                            obj = obj[splat[i]];
+                        }
+                    }
+
+                    _.update();
+                }
+            }
         }
     };
 
-var CTAAppearance = Route.createElement(config, function CTAAppearance(options) {
+var CTAIndex = Route.createElement(config, function CTAIndex(options) {
     var _ = this;
+
     _.supercreate(options);
-    _.set('id', '123');
 });
 
-CTAAppearance.definePrototype({
+CTAIndex.definePrototype({
+    beforeLoad: function beforeLoad(done) {
+        var _ = this;
+
+        if (_.app.currentRoute === _) {
+            return done( _.path + '/dashboard' );
+        }
+
+        done();
+    }
 });
 
-module.exports = CTAAppearance;
+module.exports = CTAIndex;
 
-},{"../../utils/route":28,"../../views/ctas/appearance.bars":41,"../../views/ctas/cta-bar.bars":42}],19:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/ctas/cta-bar.bars":56,"../../views/ctas/index.bars":57,"/Users/dread/Apps/bars-app":1}],36:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/ctas/schedule.bars')
-        },
-        partials: {
-            'cta-bar': require('../../views/ctas/cta-bar.bars')
         }
     };
 
 var CTASchedule = Route.createElement(config, function CTASchedule(options) {
     var _ = this;
     _.supercreate(options);
-    _.set('id', '123');
+    
 });
 
 CTASchedule.definePrototype({
@@ -2652,21 +5094,18 @@ CTASchedule.definePrototype({
 
 module.exports = CTASchedule;
 
-},{"../../utils/route":28,"../../views/ctas/cta-bar.bars":42,"../../views/ctas/schedule.bars":43}],20:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/ctas/schedule.bars":58,"/Users/dread/Apps/bars-app":1}],37:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/ctas/settings.bars')
-        },
-        partials: {
-            'cta-bar': require('../../views/ctas/cta-bar.bars')
         }
     };
 
 var CTASettings = Route.createElement(config, function CTASettings(options) {
     var _ = this;
     _.supercreate(options);
-    _.set('id', '123');
+    
 });
 
 CTASettings.definePrototype({
@@ -2674,14 +5113,11 @@ CTASettings.definePrototype({
 
 module.exports = CTASettings;
 
-},{"../../utils/route":28,"../../views/ctas/cta-bar.bars":42,"../../views/ctas/settings.bars":44}],21:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/ctas/settings.bars":59,"/Users/dread/Apps/bars-app":1}],38:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/ctas/show.bars')
-        },
-        partials: {
-            'cta-bar': require('../../views/ctas/cta-bar.bars')
         }
     };
 
@@ -2695,21 +5131,18 @@ CTAShow.definePrototype({
 
 module.exports = CTAShow;
 
-},{"../../utils/route":28,"../../views/ctas/cta-bar.bars":42,"../../views/ctas/show.bars":45}],22:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/ctas/show.bars":60,"/Users/dread/Apps/bars-app":1}],39:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/ctas/triggers.bars')
-        },
-        partials: {
-            'cta-bar': require('../../views/ctas/cta-bar.bars')
         }
     };
 
 var CTATriggers = Route.createElement(config, function CTATriggers(options) {
     var _ = this;
     _.supercreate(options);
-    _.set('id', '123');
+    
 });
 
 CTATriggers.definePrototype({
@@ -2717,8 +5150,8 @@ CTATriggers.definePrototype({
 
 module.exports = CTATriggers;
 
-},{"../../utils/route":28,"../../views/ctas/cta-bar.bars":42,"../../views/ctas/triggers.bars":46}],23:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/ctas/triggers.bars":61,"/Users/dread/Apps/bars-app":1}],40:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/help/index.bars')
@@ -2738,8 +5171,8 @@ HelpIndex.definePrototype({
 
 module.exports = HelpIndex;
 
-},{"../../utils/route":28,"../../views/application/top-bar.bars":39,"../../views/help/index.bars":47}],24:[function(require,module,exports){
-var Route = require('../../utils/route'),
+},{"../../views/application/top-bar.bars":54,"../../views/help/index.bars":62,"/Users/dread/Apps/bars-app":1}],41:[function(require,module,exports){
+var Route = require('/Users/dread/Apps/bars-app').Route,
     Pikaday = require('../../vendor/pikaday'),
     moment = require('moment'),
     config = {
@@ -2755,541 +5188,68 @@ var Route = require('../../utils/route'),
 var PeopleIndex = Route.createElement(config, function PeopleIndex(options) {
     var _ = this;
     _.supercreate(options);
-
-    _.fromPicker = new Pikaday({
-        field: _.$element.find('[name="from"]')[0],
-        firstDay: 1,
-        minDate: new Date('2000-01-01'),
-        maxDate: new Date('2020-12-31'),
-        yearRange: [2000,2020]
-    });
-
-    _.toPicker = new Pikaday({
-        field: _.$element.find('[name="to"]')[0],
-        firstDay: 1,
-        minDate: new Date('2000-01-01'),
-        maxDate: new Date('2020-12-31'),
-        yearRange: [2000,2020]
-    });
-
-    _.set('filters', {
-        from: moment().subtract(7, 'days').format('YYYY-MM-D'),
-        to: moment().format('YYYY-MM-D')
-    });
 });
 
 PeopleIndex.definePrototype({
-    unload: function unload() {
+    beforeLoad: function beforeLoad(done) {
+        var _ = this;
+
+        _.fromPicker = new Pikaday({
+            field: _.$element.find('[name="from"]')[0],
+            firstDay: 1,
+            minDate: new Date('2000-01-01'),
+            maxDate: new Date('2020-12-31'),
+            yearRange: [2000,2020]
+        });
+
+        _.toPicker = new Pikaday({
+            field: _.$element.find('[name="to"]')[0],
+            firstDay: 1,
+            minDate: new Date('2000-01-01'),
+            maxDate: new Date('2020-12-31'),
+            yearRange: [2000,2020]
+        });
+
+        _.set('filters', {
+            from: moment().subtract(7, 'days').format('YYYY-MM-D'),
+            to: moment().format('YYYY-MM-D')
+        });
+
+        done();
+    },
+
+    afterUnload: function afterUnload(done) {
         var _ = this;
 
         _.toPicker.destroy();
         _.fromPicker.destroy();
+
+        done();
     }
 });
 
 module.exports = PeopleIndex;
 
-},{"../../utils/route":28,"../../vendor/pikaday":30,"../../views/application/filters.bars":37,"../../views/application/top-bar.bars":39,"../../views/people/index.bars":48,"moment":55}],25:[function(require,module,exports){
+},{"../../vendor/pikaday":44,"../../views/application/filters.bars":52,"../../views/application/top-bar.bars":54,"../../views/people/index.bars":63,"/Users/dread/Apps/bars-app":1,"moment":66}],42:[function(require,module,exports){
 window.$ = require('jquery');
 window.$.browser = require('./utils/browser');
 
-window.LCS = require('./controllers/application').create({
-    $element: $('#lcs')
+window.LCS = require('/Users/dread/Apps/bars-app').Router.create({
+    $element: $('#lcs'),
+    routes: require('./controllers/application/routes'),
+    urlType: 'hash',
+    debug: true
 });
 
-},{"./controllers/application":15,"./utils/browser":26,"jquery":54}],26:[function(require,module,exports){
-var browser = {
-        isTouch: 'ontouchstart' in document.documentElement
-    },
-    touchEvents = {
-        click: 'touchend',
-        mouseenter: 'touchstart',
-        mouseleave: 'touchend touchcancel touchmove'
-    };
-
-browser.event = function(event) {
-    if (this.isTouch) {
-        return touchEvents[event];
-    } else {
-        return event;
-    }
+window.LCS.cta = {
+    name: 'Lively Chat',
+    id: 123,
+    active: false
 };
 
-module.exports = browser;
-
-},{}],27:[function(require,module,exports){
-var Bindable = require('generate-js-bindings'),
-    Bars = require('/Users/dread/Apps/compilr/Bars'),
-    globalBars = Bars.create();
-
-function attach(config) {
-    var _ = this,
-        klass = config.class,
-        proto = config.proto,
-        key;
-
-    delete config.proto;
-    delete config.class;
-
-    _.registerConfig(config);
-
-    for (key in klass) {
-        _[key] = klass[key];
-    }
-
-    _.definePrototype({
-        writable: true,
-        configurable: true
-    }, proto);
-
-    config.class = klass;
-    config.proto = proto;
-}
-
-function registerConfig(config) {
-    var _ = this,
-        templates = config.templates,
-        partials = config.partials,
-        helpers = config.helpers,
-        blocks = config.blocks,
-        interactions = config.interactions,
-        key;
-
-    delete config.templates;
-    delete config.partials;
-    delete config.helpers;
-    delete config.blocks;
-    delete config.interactions;
-
-    if (templates) {
-        for (key in templates) {
-            _.proto.templates[key] = globalBars.parse(templates[key]);
-        }
-    }
-
-    if (partials) {
-        for (key in partials) {
-            _.proto.partials[key] = globalBars.parse(partials[key]);
-        }
-    }
-
-    if (helpers) {
-        for (key in helpers) {
-            _.proto.helpers[key] = helpers[key];
-        }
-    }
-
-    if (blocks) {
-        for (key in blocks) {
-            _.proto.blocks[key] = blocks[key];
-        }
-    }
-
-    if (interactions) {
-        for (key in interactions) {
-            _.proto.interactions[key] = interactions[key];
-        }
-    }
-
-    _.definePrototype({
-        writable: true,
-        enumerable: true,
-        configurable: true
-    }, config);
-
-    config.templates = templates;
-    config.partials = partials;
-    config.helpers = helpers;
-    config.blocks = blocks;
-    config.interactions = interactions;
-}
-
-function registerBars(_) {
-    var key;
-
-    for (key in _.partials) {
-        if (!_.Bars.partials[key]) {
-            _.Bars.partials[key] = _.Bars.build(_.partials[key]);
-        }
-    }
-
-    for (key in _.templates) {
-        if (!_.templates[key].bars) {
-            _.templates[key] = _.Bars.build(_.templates[key]);
-        }
-    }
-
-    for (key in _.helpers) {
-        if (!_.helpers[key].bars) {
-            _.Bars.helpers[key] = _.helpers[key];
-        }
-    }
-
-    for (key in _.blocks) {
-        if (!_.blocks[key].bars) {
-            _.Bars.blocks[key] = _.blocks[key];
-        }
-    }
-}
-
-function createElement(config, constructor) {
-    var _ = this,
-        el = _.generate(constructor);
-
-    el.definePrototype({
-        templates: Object.create(_.proto.templates),
-        helpers: Object.create(_.proto.helpers),
-        blocks: Object.create(_.proto.blocks),
-        partials: Object.create(_.proto.partials),
-        interactions: Object.create(_.proto.interactions)
-    });
-
-    el.createElement = createElement;
-    el.registerConfig = registerConfig;
-    el.attach = attach;
-
-    el.registerConfig(config);
-
-    return el;
-}
-
-var CustomElement = Bindable.generate(function CustomElement(options) {
-    options = options || {};
-
-    var _ = this,
-        $element = $(options.$element);
-
-    _.supercreate(options);
-
-    _.$element = $element.length ? $element : $('<div>');
-
-    _.Bars = Bars.create();
-
-    registerBars(_);
-
-    _.registerInteractions(_.interactions);
-
-    _.defineProperties({
-        templates: Object.create(_.templates)
-    });
-
-    _.render();
-});
-
-CustomElement.createElement = createElement;
-
-CustomElement.definePrototype({
-    templates: {},
-    helpers: {},
-    blocks: {},
-    partials: {},
-    interactions: {}
-});
-
-CustomElement.definePrototype({
-    update: function(data) {
-        var _ = this;
-        _.dom.update(data || _._data);
-    },
-
-    dispose: function dispose() {
-        var _ = this;
-        _.$element.off();
-        _.$element.empty();
-    },
-
-    render: function render(template) {
-        var _ = this;
-
-        template = typeof template === 'string' ? _.templates[template] : _.templates.index;
-
-        if (template && typeof template.render === 'function') {
-            _.$element.empty();
-            _.dom = template.render(_._data);
-            _.dom.appendTo(_.$element[0]);
-            _.dom.update(_._data);
-        } else {
-            _.emit('error', new Error('Failed to render: Invalid template.'));
-        }
-    }
-});
-
-CustomElement.definePrototype({
-    __eventListener: function eventListener(interaction) {
-        var _ = this;
-
-        return function (event) {
-            return interaction.listener.call(_, event, $(this));
-        };
-    },
-
-    registerInteractions: function registerInteractions(interactions) {
-        var _ = this,
-            interaction, key;
-
-        for (key in interactions) {
-            interaction = interactions[key];
-
-            if (interaction.target) {
-                _.$element.on(interaction.event, interaction.target, _.__eventListener(interaction));
-            } else {
-                _.$element.on(interaction.event, _.__eventListener(interaction));
-            }
-        }
-    },
-
-    registerTemplates: function registerTemplates(templates) {
-        var _ = this,
-            key;
-
-        for (key in templates) {
-            _.templates[name] = _.Bars.key( templates[key] );
-        }
-    },
-
-    registerBlocks: function registerBlocks(blocks) {
-        var _ = this,
-            key;
-
-        for (key in blocks) {
-            _.Bars.registerBlock(key, blocks[key]);
-        }
-    },
-
-    registerPartials: function registerPartials(partials) {
-        var _ = this,
-            key;
-
-        for (key in partials) {
-            _.Bars.registerPartial(key, partials[key]);
-        }
-    },
-
-    registerHelpers: function registerHelpers(helpers) {
-        var _ = this,
-            key;
-
-        for (key in helpers) {
-            _.Bars.registerHelper(key, helpers[key]);
-        }
-    },
-});
-
-module.exports = CustomElement;
-
-},{"/Users/dread/Apps/compilr/Bars":1,"generate-js-bindings":51}],28:[function(require,module,exports){
-var CustomElement = require('../utils/custom-element'),
-    Bindable = require('generate-js-bindings');
-
-var config = {
-    templates: {
-        index: 'No template set {{key}}.'
-    }
-};
-
-var Route = CustomElement.createElement(config, function Route(options) {
-    var _ = this;
-
-    _.supercreate(options);
-
-    _.$element.addClass(
-        (options.blueprint + '')
-            .substring(1)
-            .replace(/\//g, '-')
-            .replace(/[^-0-9A-Za-z]/g, '') +
-            '-controller'
-    );
-
-    _.defineProperties({
-        writable: true
-    }, {
-        cacheable: true
-    });
-});
-
-Bindable.generateGetters(Route, ['app', 'params']);
-
-Route.definePrototype({
-    _getApp: function _getApp() {
-        var _ = this;
-
-        return _.get('app');
-    },
-    _getParams: function _getParams() {
-        var _ = this;
-
-        return _.get('params');
-    },
-    unload: function unload() { }
-    // onShow: function onShow() {}
-});
-
-module.exports = Route;
-
-},{"../utils/custom-element":27,"generate-js-bindings":51}],29:[function(require,module,exports){
-var CustomElement = require('../utils/custom-element'),
-    Bindable = require('generate-js-bindings'),
-    async = require('async'),
-    config = {
-        interactions: {
-            go: {
-                event: window.$.browser.event('click'),
-                target: '[data-go]',
-                listener: function listener(e, $el) {
-                    var _ = this;
-                    _.go($el.attr('data-go'));
-                }
-            }
-        }
-    };
-
-var Router = CustomElement.createElement(config, function Router(options) {
-    var _ = this,
-        path = window.location.hash;
-
-    _.supercreate(options);
-    _.defineProperties(options);
-
-    $(window).on('hashchange', function() {
-        var path = window.location.hash;
-        _.go(path);
-    });
-
-    _.go(path);
-});
-
-Bindable.generateGettersSetters(Router, ['currentRoute']);
-
-Router.definePrototype({
-    parseURI: function parseURI(path) {
-        path = path.replace(/#!/, '');
-
-        var _ = this,
-            params = {},
-            splitPath = path.split('/'),
-            route, splitRoute, isEqual, isDynamic, key;
-
-        if (!path.length) {
-            return {
-                path: '/',
-                blueprint: '/',
-                route: _.routes['/'],
-                params: {}
-            };
-        }
-
-        routesLoop:
-        for (key in _.routes) {
-            splitRoute = key.split('/');
-
-            pathLoop:
-            for (var i = 0; i < splitPath.length; i++) {
-                isDynamic = splitRoute[i] && splitRoute[i][0] === ':';
-                isEqual = splitPath[i] === splitRoute[i];
-
-                if (isDynamic) {
-                    params[splitRoute[i].replace(/:/, '')] = splitPath[i];
-                }
-
-                if (isDynamic || isEqual) {
-                    if (i === splitPath.length - 1) { // LAST
-                        route = _.routes[key];
-                        break routesLoop;
-                    } else {
-                        continue pathLoop;
-                    }
-                }
-
-                params = {};
-                break pathLoop;
-            }
-        }
-
-        return {
-            path: path,
-            blueprint: key,
-            route: route,
-            params: params
-        };
-    },
-
-    go: function go(path, reload) {
-        var _ = this,
-            uri = _.parseURI(path),
-            currentRoute = _.currentRoute;
-
-        if (!reload && window.location.hash !== '#!' + uri.path) {
-            // console.log('Route does not match: ' + uri.path);
-            window.location.hash = '#!' + uri.path;
-            return;
-        }
-
-        if (!uri.route) {
-            console.log('Route not found: ' + uri.path);
-            if (currentRoute) window.location.hash = '#!' + currentRoute.path;
-            return;
-        }
-
-        window.scrollTo(0, 0);
-
-        uri.app = _;
-
-        _.loading();
-        _.currentRoute && _.currentRoute.unload();
-
-        currentRoute = uri.route.create(uri);
-        _.currentRoute = currentRoute;
-
-        _.markActive(uri.path);
-
-        async.waterfall(currentRoute.beforeFilters || [], function(err) {
-            if (typeof err === 'string') return _.go(err);
-
-
-            var $target = _.$element.find('[data-outlet]:first');
-            $target.empty();
-            currentRoute.$element.appendTo($target);
-
-            _.update();
-            currentRoute.update();
-            currentRoute.$element.find('[autofocus]:first').trigger('focus');
-
-            _.markActive(uri.path);
-            _.unloading();
-
-            async.waterfall(currentRoute.afterFilters || []);
-        });
-    },
-
-    loading: function loading() {},
-    unloading: function unloading() {},
-
-    markActive: function markActive(path) {
-        if (!path) return;
-
-        var _ = this,
-            splath = path.split('/');
-
-        _.$element.find('[href], [data-go]')
-            .removeClass('active')
-            .removeClass('parent-of-active');
-
-        _.$element.find('[href="#!' + path + '"], [data-go="' + path + '"]')
-            .addClass('active');
-
-        var ancestorPath = '';
-        for (var i = 1; i < splath.length; i++) {
-            ancestorPath += '/' + splath[i];
-
-            _.$element.find('[href="#!' + ancestorPath + '"], [data-go="' + ancestorPath + '"]')
-                .addClass('parent-of-active');
-        }
-    }
-});
-
-module.exports = window.FWP = Router;
-
-},{"../utils/custom-element":27,"async":49,"generate-js-bindings":51}],30:[function(require,module,exports){
+},{"./controllers/application/routes":33,"./utils/browser":43,"/Users/dread/Apps/bars-app":1,"jquery":65}],43:[function(require,module,exports){
+arguments[4][10][0].apply(exports,arguments)
+},{"dup":10}],44:[function(require,module,exports){
 /*!
  * Pikaday
  *
@@ -4375,1287 +6335,64 @@ module.exports = window.FWP = Router;
 
 }));
 
-},{"moment":55}],31:[function(require,module,exports){
+},{"moment":66}],45:[function(require,module,exports){
 module.exports = "<div class=\"sub-bar\">\n    <div class=\"h1-wrapper\">\n        <h1>\n            My Account\n        </h1>\n    </div>\n    <ul>\n        <li data-go=\"/accounts/edit\">\n            <span class=\"title\">My Account</span>\n            <span class=\"description\">Your Personal Details</span>\n        </li>\n        <li data-go=\"/accounts/users\">\n            <span class=\"title\">Users</span>\n            <span class=\"description\">Connected Users</span>\n        </li>\n        <li data-go=\"/accounts/billing\">\n            <span class=\"title\">Billing</span>\n            <span class=\"description\">Upgrade Your Plan</span>\n        </li>\n    </ul>\n</div>\n";
 
-},{}],32:[function(require,module,exports){
-module.exports = "{{>accounts-bar}}\n\n<form>\n    <div class=\"field\">\n        <label>CC#</label>\n        <input type=\"email\" name=\"message\">\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Save Account\n        </button>\n    </div>\n</form>\n";
-
-},{}],33:[function(require,module,exports){
-module.exports = "{{>accounts-bar}}\n\n<form>\n    <div class=\"field\">\n        <label>Email</label>\n        <input type=\"email\" name=\"message\">\n    </div>\n    <div class=\"field\">\n        <label>Password</label>\n        <input type=\"password\" name=\"password\">\n    </div>\n    <div class=\"field\">\n        <label>Confirm Password</label>\n        <input type=\"password\">\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Save Account\n        </button>\n    </div>\n</form>\n";
-
-},{}],34:[function(require,module,exports){
-module.exports = "<form>\n    <div class=\"field\">\n        <label>Email</label>\n        <input type=\"email\" name=\"email\">\n    </div>\n    <div class=\"field\">\n        <label>Password</label>\n        <input type=\"password\" name=\"password\">\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Save Account\n        </button>\n    </div>\n</form>\n";
-
-},{}],35:[function(require,module,exports){
-module.exports = "<form>\n    <div class=\"field\">\n        <label>Name</label>\n        <input type=\"text\" name=\"name\">\n    </div>\n    <div class=\"field\">\n        <label>Email</label>\n        <input type=\"email\" name=\"email\">\n    </div>\n    <div class=\"field\">\n        <label>Password</label>\n        <input type=\"password\" name=\"password\">\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Save Account\n        </button>\n    </div>\n</form>\n";
-
-},{}],36:[function(require,module,exports){
-module.exports = "{{>accounts-bar}}\n\n<table>\n    <thead>\n        <tr>\n            <th>Name</th>\n            <th>Email</th>\n            <th>Mobile</th>\n            <th></th>\n        </tr>\n    </thead>\n    <tbody>\n        <tr data-go=\"/people\">\n            <td>Dallas Read</td>\n            <td>dallas@excitecreative.ca</td>\n            <td>+19029997606</td>\n            <td>Delete</td>\n        </tr>\n        <tr data-go=\"/people\">\n            <td>Dallas Read</td>\n            <td>dallas@excitecreative.ca</td>\n            <td>+19029997606</td>\n            <td>Delete</td>\n        </tr>\n    </tbody>\n</table>\n";
-
-},{}],37:[function(require,module,exports){
-module.exports = "<div class=\"sub-bar\">\n    <form>\n        <select>\n            <option>{{app/cta/name}}</option>\n        </select>\n        <select>\n            <option>Everyone</option>\n            <option>Who's Online</option>\n            <option>Chatted Recently</option>\n        </select>\n        <input type=\"text\" name=\"from\" value=\"{{filters/from}}\" placeholder=\"From\">\n        <input type=\"text\" name=\"to\" value=\"{{filters/to}}\" placeholder=\"To\">\n    </form>\n\n    <ul>\n        <li data-change-input-value=\"page\" data-value=\"1\">\n            <i class=\"fa fa-angle-left\"></i>\n        </li>\n        <li data-change-input-value=\"page\" data-value=\"2\">\n            <i class=\"fa fa-angle-right\"></i>\n        </li>\n    </ul>\n</div>\n";
-
-},{}],38:[function(require,module,exports){
-module.exports = "<div class=\"lcs\">\n    {{>top-bar}}\n    <div class=\"loading\"></div>\n    <div data-outlet></div>\n</div>\n";
-
-},{}],39:[function(require,module,exports){
-module.exports = "<div class=\"top-bar\">\n    <h1 data-go=\"/\">LCS</h1>\n    <ul>\n        <li data-go=\"/people\">People</li>\n        <li data-go=\"/\">Conversations</li>\n        <li data-go=\"/ctas/{{cta/id}}\">Lively Chat</li>\n        <li data-go=\"/help\">Help</li>\n        <li data-go=\"/accounts/edit\">My Account</li>\n    </ul>\n</div>\n";
-
-},{}],40:[function(require,module,exports){
-module.exports = "{{>filters}}\n\nThis lists conversations that have happened.\n";
-
-},{}],41:[function(require,module,exports){
-module.exports = "\n<div class=\"cta\">\n    {{>cta-bar}}\n\n    <div class=\"cta-content\">\n        APPEARANCE.\n\n        # ONLINE\n        [color]\n        [trigger]\n        [position on screen]\n        [actions?]\n\n        # OFFLINE\n        [exists]\n        [trigger]\n        [actions: emails to send]\n        [thank you text]\n    </div>\n</div>\n";
-
-},{}],42:[function(require,module,exports){
-module.exports = "<div class=\"sub-bar\">\n    <div class=\"toggler h1-wrapper\" data-attr=\"app/cta/active\">\n        <i class=\"fa fa-toggle-on {{#if app/cta/active}}true{{else}}fa-flip-horizontal{{/if}}\"></i>\n        <h1>\n            {{app/cta/name}}\n        </h1>\n    </div>\n    <ul>\n        <li data-go=\"/ctas/{{app/cta/id}}\">\n            <span class=\"title\">Dashboard</span>\n            <span class=\"description\">An overview of your chat.</span>\n        </li>\n        <li data-go=\"/ctas/{{app/cta/id}}/appearance\">\n            <span class=\"title\">Appearance</span>\n            <span class=\"description\">How your chat looks.</span>\n        </li>\n        <li data-go=\"/ctas/{{app/cta/id}}/schedule\">\n            <span class=\"title\">Schedule</span>\n            <span class=\"description\">Who can chat when?</span>\n        </li>\n        <li data-go=\"/ctas/{{app/cta/id}}/triggers\">\n            <span class=\"title\">Triggers</span>\n            <span class=\"description\">Start a conversation.</span>\n        </li>\n        <li data-go=\"/ctas/{{app/cta/id}}/settings\">\n            <span class=\"title\">Settings</span>\n            <span class=\"description\">Visibility and Resets.</span>\n        </li>\n    </ul>\n</div>\n";
-
-},{}],43:[function(require,module,exports){
-module.exports = "<div class=\"cta\">\n    {{>cta-bar}}\n    <div class=\"cta-content\">\n        SCHEUDLES.\n\n        [When are agents available to chat?]\n        [Which Agents are available?]\n    </div>\n</div>\n";
-
-},{}],44:[function(require,module,exports){
-module.exports = "<div class=\"cta\">\n    {{>cta-bar}}\n\n    <div class=\"cta-content\">\n        - Hide for small mobile devices\n        - Hide for tablets\n        - Hide for desktops\n        - Which pages should SHOW this CTA?\n        - Which pages should HIDE this CTA?\n        - Delete all history\n    </div>\n</div>\n";
-
-},{}],45:[function(require,module,exports){
-module.exports = "<div class=\"cta\">\n    {{>cta-bar}}\n    <div class=\"screen\"></div>\n\n    <div class=\"cta-content\">\n        DASHBOARD<br><br>\n        Total chats, Ratings, average time to first response, availability, visitors online\n    </div>\n</div>\n";
-
 },{}],46:[function(require,module,exports){
-module.exports = "<div class=\"cta\">\n    {{>cta-bar}}\n\n    <div class=\"cta-content\">\n        TRIGGERS\n    </div>\n</div>\n";
+module.exports = "<form>\n    <div class=\"field\">\n        <label>CC#</label>\n        <input type=\"email\" name=\"message\">\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Save Account\n        </button>\n    </div>\n</form>\n";
 
 },{}],47:[function(require,module,exports){
-module.exports = "<div class=\"sub-bar\">\n    <div class=\"h1-wrapper\">\n        <h1>\n            Help\n        </h1>\n    </div>\n</div>\n\n<form>\n    <div class=\"field\">\n        <label>Send us a message and we'll respond as soon as we can!</label>\n        <textarea name=\"message\"></textarea>\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Send Message\n        </button>\n    </div>\n</form>\n";
+module.exports = "<form>\n    <div class=\"field\">\n        <label>Email</label>\n        <input type=\"email\" name=\"message\" autofocus>\n    </div>\n    <div class=\"field\">\n        <label>Password</label>\n        <input type=\"password\" name=\"password\">\n    </div>\n    <div class=\"field\">\n        <label>Confirm Password</label>\n        <input type=\"password\">\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Save Account\n        </button>\n    </div>\n</form>\n";
 
 },{}],48:[function(require,module,exports){
-module.exports = "{{>filters}}\n\n<table>\n    <thead>\n        <tr>\n            <th>Name</th>\n            <th>Email</th>\n            <th>Mobile</th>\n            <th></th>\n        </tr>\n    </thead>\n    <tbody>\n        <tr data-go=\"/people\">\n            <td>Dallas Read</td>\n            <td>dallas@excitecreative.ca</td>\n            <td>+19029997606</td>\n            <td>Delete</td>\n        </tr>\n        <tr data-go=\"/people\">\n            <td>Dallas Read</td>\n            <td>dallas@excitecreative.ca</td>\n            <td>+19029997606</td>\n            <td>Delete</td>\n        </tr>\n    </tbody>\n</table>\n";
+module.exports = "{{>accounts-bar}}\n\n<div data-outlet></div>\n";
 
 },{}],49:[function(require,module,exports){
-(function (process,global){
-/*!
- * async
- * https://github.com/caolan/async
- *
- * Copyright 2010-2014 Caolan McMahon
- * Released under the MIT license
- */
-(function () {
+module.exports = "<form>\n    <div class=\"field\">\n        <label>Email</label>\n        <input type=\"email\" name=\"email\">\n    </div>\n    <div class=\"field\">\n        <label>Password</label>\n        <input type=\"password\" name=\"password\">\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Save Account\n        </button>\n    </div>\n</form>\n";
 
-    var async = {};
-    function noop() {}
-    function identity(v) {
-        return v;
-    }
-    function toBool(v) {
-        return !!v;
-    }
-    function notId(v) {
-        return !v;
-    }
+},{}],50:[function(require,module,exports){
+module.exports = "<form>\n    <div class=\"field\">\n        <label>Name</label>\n        <input type=\"text\" name=\"name\">\n    </div>\n    <div class=\"field\">\n        <label>Email</label>\n        <input type=\"email\" name=\"email\">\n    </div>\n    <div class=\"field\">\n        <label>Password</label>\n        <input type=\"password\" name=\"password\">\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Save Account\n        </button>\n    </div>\n</form>\n";
 
-    // global on the server, window in the browser
-    var previous_async;
+},{}],51:[function(require,module,exports){
+module.exports = "<table>\n    <thead>\n        <tr>\n            <th>Name</th>\n            <th>Email</th>\n            <th>Mobile</th>\n            <th></th>\n        </tr>\n    </thead>\n    <tbody>\n        <tr data-go=\"/people\">\n            <td>Dallas Read</td>\n            <td>dallas@excitecreative.ca</td>\n            <td>+19029997606</td>\n            <td>Delete</td>\n        </tr>\n        <tr data-go=\"/people\">\n            <td>Dallas Read</td>\n            <td>dallas@excitecreative.ca</td>\n            <td>+19029997606</td>\n            <td>Delete</td>\n        </tr>\n    </tbody>\n</table>\n";
 
-    // Establish the root object, `window` (`self`) in the browser, `global`
-    // on the server, or `this` in some virtual machines. We use `self`
-    // instead of `window` for `WebWorker` support.
-    var root = typeof self === 'object' && self.self === self && self ||
-            typeof global === 'object' && global.global === global && global ||
-            this;
+},{}],52:[function(require,module,exports){
+module.exports = "<div class=\"sub-bar\">\n    <form>\n        <select>\n            <option>{{app/cta/name}}</option>\n        </select>\n        <select>\n            <option>Everyone</option>\n            <option>Who's Online</option>\n            <option>Chatted Recently</option>\n        </select>\n        <input type=\"text\" name=\"from\" value=\"{{filters/from}}\" placeholder=\"From\">\n        <input type=\"text\" name=\"to\" value=\"{{filters/to}}\" placeholder=\"To\">\n    </form>\n\n    <ul>\n        <li data-change-input-value=\"page\" data-value=\"1\">\n            <i class=\"fa fa-angle-left\"></i>\n        </li>\n        <li data-change-input-value=\"page\" data-value=\"2\">\n            <i class=\"fa fa-angle-right\"></i>\n        </li>\n    </ul>\n</div>\n";
 
-    if (root != null) {
-        previous_async = root.async;
-    }
+},{}],53:[function(require,module,exports){
+module.exports = "<div class=\"lcs\">\n    {{>top-bar}}\n    <div class=\"loading\"></div>\n    <div data-outlet></div>\n</div>\n";
 
-    async.noConflict = function () {
-        root.async = previous_async;
-        return async;
-    };
+},{}],54:[function(require,module,exports){
+module.exports = "<div class=\"top-bar\">\n    <h1 data-go=\"/conversations\">LCS</h1>\n    <ul>\n        <li data-go=\"/people\">People</li>\n        <li data-go=\"/conversations\">Conversations</li>\n        <li data-go=\"/ctas/{{cta/id}}\">Lively Chat</li>\n        <li data-go=\"/accounts\">My Account</li>\n        <li data-go=\"/help\">Help</li>\n    </ul>\n</div>\n";
 
-    function only_once(fn) {
-        return function() {
-            if (fn === null) throw new Error("Callback was already called.");
-            fn.apply(this, arguments);
-            fn = null;
-        };
-    }
+},{}],55:[function(require,module,exports){
+module.exports = "{{>filters}}\n\nThis lists conversations that have happened.\n";
 
-    function _once(fn) {
-        return function() {
-            if (fn === null) return;
-            fn.apply(this, arguments);
-            fn = null;
-        };
-    }
+},{}],56:[function(require,module,exports){
+module.exports = "<div class=\"sub-bar\">\n    <div class=\"toggler h1-wrapper\" data-attr=\"app/cta/active\">\n        <i class=\"fa fa-toggle-on {{#if app/cta/active}}true{{else}}fa-flip-horizontal{{/if}}\"></i>\n        <h1>\n            {{app/cta/name}}\n        </h1>\n    </div>\n    <ul>\n        <li data-go=\"/ctas/{{app/cta/id}}/dashboard\">\n            <span class=\"title\">Dashboard</span>\n            <span class=\"description\">An overview of your chat.</span>\n        </li>\n        <!-- <li data-go=\"/ctas/{{app/cta/id}}/appearance\">\n            <span class=\"title\">Appearance</span>\n            <span class=\"description\">How your chat looks.</span>\n        </li> -->\n        <li data-go=\"/ctas/{{app/cta/id}}/schedule\">\n            <span class=\"title\">Schedule</span>\n            <span class=\"description\">Who can chat when?</span>\n        </li>\n        <li data-go=\"/ctas/{{app/cta/id}}/triggers\">\n            <span class=\"title\">Triggers</span>\n            <span class=\"description\">Start a conversation.</span>\n        </li>\n        <li data-go=\"/ctas/{{app/cta/id}}/settings\">\n            <span class=\"title\">Settings</span>\n            <span class=\"description\">Visibility and Resets.</span>\n        </li>\n    </ul>\n</div>\n\n{{#unless app/cta/active}}\n    Oh noes! This is inactive!\n{{/unless}}\n";
 
-    //// cross-browser compatiblity functions ////
+},{}],57:[function(require,module,exports){
+module.exports = "<div class=\"cta\">\n    {{>cta-bar}}\n\n    <div class=\"cta-content\">\n        <div data-outlet></div>\n    </div>\n</div>\n";
 
-    var _toString = Object.prototype.toString;
+},{}],58:[function(require,module,exports){
+module.exports = "SCHEUDLES.\n\n[When are agents available to chat?]\n[Which Agents are available?]\n";
 
-    var _isArray = Array.isArray || function (obj) {
-        return _toString.call(obj) === '[object Array]';
-    };
+},{}],59:[function(require,module,exports){
+module.exports = "- Hide for small mobile devices\n- Hide for tablets\n- Hide for desktops\n- Which pages should SHOW this CTA?\n- Which pages should HIDE this CTA?\n- Delete all history\n";
 
-    // Ported from underscore.js isObject
-    var _isObject = function(obj) {
-        var type = typeof obj;
-        return type === 'function' || type === 'object' && !!obj;
-    };
+},{}],60:[function(require,module,exports){
+module.exports = "<div class=\"container container-narrow\">\n    <h2>{{app/cta/name}} by the Numbers...</h2>\n    <!-- Popular pages to chat on? -->\n    <table>\n        <tr>\n            <td>How many visitors have seen the chat in the last week?</td>\n            <td class=\"align-right\"><strong>13,111</strong></td>\n        </tr>\n        <tr>\n            <td>How many visitors have interacted with the chat?</td>\n            <td class=\"align-right\"><strong>400 (5.3%)</strong></td>\n        </tr>\n        <tr>\n            <td>How many visitors are online now?</td>\n            <td class=\"align-right\"><strong>23</strong></td>\n        </tr>\n        <tr>\n            <td>How long is the average conversation?</td>\n            <td class=\"align-right\"><strong>4:11</strong></td>\n        </tr>\n        <!-- <tr>\n            <td>When is the chat availabile?</td>\n            <td class=\"align-right\"><strong>11:11</strong></td>\n        </tr> -->\n    </table>\n</div>\n";
 
-    function _isArrayLike(arr) {
-        return _isArray(arr) || (
-            // has a positive integer length property
-            typeof arr.length === "number" &&
-            arr.length >= 0 &&
-            arr.length % 1 === 0
-        );
-    }
+},{}],61:[function(require,module,exports){
+module.exports = "TRIGGERS\n";
 
-    function _each(coll, iterator) {
-        return _isArrayLike(coll) ?
-            _arrayEach(coll, iterator) :
-            _forEachOf(coll, iterator);
-    }
+},{}],62:[function(require,module,exports){
+module.exports = "<div class=\"sub-bar\">\n    <div class=\"h1-wrapper\">\n        <h1>\n            Help\n        </h1>\n    </div>\n</div>\n\n<form>\n    <div class=\"field\">\n        <label>Send us a message and we'll respond as soon as we can!</label>\n        <textarea name=\"message\"></textarea>\n    </div>\n    <div class=\"action\">\n        <button class=\"btn btn-large btn-blue\">\n            Send Message\n        </button>\n    </div>\n</form>\n";
 
-    function _arrayEach(arr, iterator) {
-        var index = -1,
-            length = arr.length;
+},{}],63:[function(require,module,exports){
+module.exports = "{{>filters}}\n\n<table>\n    <thead>\n        <tr>\n            <th>Name</th>\n            <th>Email</th>\n            <th>Mobile</th>\n            <th></th>\n        </tr>\n    </thead>\n    <tbody>\n        <tr data-go=\"/people\">\n            <td>Dallas Read</td>\n            <td>dallas@excitecreative.ca</td>\n            <td>+19029997606</td>\n            <td>Delete</td>\n        </tr>\n        <tr data-go=\"/people\">\n            <td>Dallas Read</td>\n            <td>dallas@excitecreative.ca</td>\n            <td>+19029997606</td>\n            <td>Delete</td>\n        </tr>\n    </tbody>\n</table>\n";
 
-        while (++index < length) {
-            iterator(arr[index], index, arr);
-        }
-    }
-
-    function _map(arr, iterator) {
-        var index = -1,
-            length = arr.length,
-            result = Array(length);
-
-        while (++index < length) {
-            result[index] = iterator(arr[index], index, arr);
-        }
-        return result;
-    }
-
-    function _range(count) {
-        return _map(Array(count), function (v, i) { return i; });
-    }
-
-    function _reduce(arr, iterator, memo) {
-        _arrayEach(arr, function (x, i, a) {
-            memo = iterator(memo, x, i, a);
-        });
-        return memo;
-    }
-
-    function _forEachOf(object, iterator) {
-        _arrayEach(_keys(object), function (key) {
-            iterator(object[key], key);
-        });
-    }
-
-    function _indexOf(arr, item) {
-        for (var i = 0; i < arr.length; i++) {
-            if (arr[i] === item) return i;
-        }
-        return -1;
-    }
-
-    var _keys = Object.keys || function (obj) {
-        var keys = [];
-        for (var k in obj) {
-            if (obj.hasOwnProperty(k)) {
-                keys.push(k);
-            }
-        }
-        return keys;
-    };
-
-    function _keyIterator(coll) {
-        var i = -1;
-        var len;
-        var keys;
-        if (_isArrayLike(coll)) {
-            len = coll.length;
-            return function next() {
-                i++;
-                return i < len ? i : null;
-            };
-        } else {
-            keys = _keys(coll);
-            len = keys.length;
-            return function next() {
-                i++;
-                return i < len ? keys[i] : null;
-            };
-        }
-    }
-
-    // Similar to ES6's rest param (http://ariya.ofilabs.com/2013/03/es6-and-rest-parameter.html)
-    // This accumulates the arguments passed into an array, after a given index.
-    // From underscore.js (https://github.com/jashkenas/underscore/pull/2140).
-    function _restParam(func, startIndex) {
-        startIndex = startIndex == null ? func.length - 1 : +startIndex;
-        return function() {
-            var length = Math.max(arguments.length - startIndex, 0);
-            var rest = Array(length);
-            for (var index = 0; index < length; index++) {
-                rest[index] = arguments[index + startIndex];
-            }
-            switch (startIndex) {
-                case 0: return func.call(this, rest);
-                case 1: return func.call(this, arguments[0], rest);
-            }
-            // Currently unused but handle cases outside of the switch statement:
-            // var args = Array(startIndex + 1);
-            // for (index = 0; index < startIndex; index++) {
-            //     args[index] = arguments[index];
-            // }
-            // args[startIndex] = rest;
-            // return func.apply(this, args);
-        };
-    }
-
-    function _withoutIndex(iterator) {
-        return function (value, index, callback) {
-            return iterator(value, callback);
-        };
-    }
-
-    //// exported async module functions ////
-
-    //// nextTick implementation with browser-compatible fallback ////
-
-    // capture the global reference to guard against fakeTimer mocks
-    var _setImmediate = typeof setImmediate === 'function' && setImmediate;
-
-    var _delay = _setImmediate ? function(fn) {
-        // not a direct alias for IE10 compatibility
-        _setImmediate(fn);
-    } : function(fn) {
-        setTimeout(fn, 0);
-    };
-
-    if (typeof process === 'object' && typeof process.nextTick === 'function') {
-        async.nextTick = process.nextTick;
-    } else {
-        async.nextTick = _delay;
-    }
-    async.setImmediate = _setImmediate ? _delay : async.nextTick;
-
-
-    async.forEach =
-    async.each = function (arr, iterator, callback) {
-        return async.eachOf(arr, _withoutIndex(iterator), callback);
-    };
-
-    async.forEachSeries =
-    async.eachSeries = function (arr, iterator, callback) {
-        return async.eachOfSeries(arr, _withoutIndex(iterator), callback);
-    };
-
-
-    async.forEachLimit =
-    async.eachLimit = function (arr, limit, iterator, callback) {
-        return _eachOfLimit(limit)(arr, _withoutIndex(iterator), callback);
-    };
-
-    async.forEachOf =
-    async.eachOf = function (object, iterator, callback) {
-        callback = _once(callback || noop);
-        object = object || [];
-        var size = _isArrayLike(object) ? object.length : _keys(object).length;
-        var completed = 0;
-        if (!size) {
-            return callback(null);
-        }
-        _each(object, function (value, key) {
-            iterator(object[key], key, only_once(done));
-        });
-        function done(err) {
-            if (err) {
-                callback(err);
-            }
-            else {
-                completed += 1;
-                if (completed >= size) {
-                    callback(null);
-                }
-            }
-        }
-    };
-
-    async.forEachOfSeries =
-    async.eachOfSeries = function (obj, iterator, callback) {
-        callback = _once(callback || noop);
-        obj = obj || [];
-        var nextKey = _keyIterator(obj);
-        var key = nextKey();
-        function iterate() {
-            var sync = true;
-            if (key === null) {
-                return callback(null);
-            }
-            iterator(obj[key], key, only_once(function (err) {
-                if (err) {
-                    callback(err);
-                }
-                else {
-                    key = nextKey();
-                    if (key === null) {
-                        return callback(null);
-                    } else {
-                        if (sync) {
-                            async.nextTick(iterate);
-                        } else {
-                            iterate();
-                        }
-                    }
-                }
-            }));
-            sync = false;
-        }
-        iterate();
-    };
-
-
-
-    async.forEachOfLimit =
-    async.eachOfLimit = function (obj, limit, iterator, callback) {
-        _eachOfLimit(limit)(obj, iterator, callback);
-    };
-
-    function _eachOfLimit(limit) {
-
-        return function (obj, iterator, callback) {
-            callback = _once(callback || noop);
-            obj = obj || [];
-            var nextKey = _keyIterator(obj);
-            if (limit <= 0) {
-                return callback(null);
-            }
-            var done = false;
-            var running = 0;
-            var errored = false;
-
-            (function replenish () {
-                if (done && running <= 0) {
-                    return callback(null);
-                }
-
-                while (running < limit && !errored) {
-                    var key = nextKey();
-                    if (key === null) {
-                        done = true;
-                        if (running <= 0) {
-                            callback(null);
-                        }
-                        return;
-                    }
-                    running += 1;
-                    iterator(obj[key], key, only_once(function (err) {
-                        running -= 1;
-                        if (err) {
-                            callback(err);
-                            errored = true;
-                        }
-                        else {
-                            replenish();
-                        }
-                    }));
-                }
-            })();
-        };
-    }
-
-
-    function doParallel(fn) {
-        return function (obj, iterator, callback) {
-            return fn(async.eachOf, obj, iterator, callback);
-        };
-    }
-    function doParallelLimit(fn) {
-        return function (obj, limit, iterator, callback) {
-            return fn(_eachOfLimit(limit), obj, iterator, callback);
-        };
-    }
-    function doSeries(fn) {
-        return function (obj, iterator, callback) {
-            return fn(async.eachOfSeries, obj, iterator, callback);
-        };
-    }
-
-    function _asyncMap(eachfn, arr, iterator, callback) {
-        callback = _once(callback || noop);
-        var results = [];
-        eachfn(arr, function (value, index, callback) {
-            iterator(value, function (err, v) {
-                results[index] = v;
-                callback(err);
-            });
-        }, function (err) {
-            callback(err, results);
-        });
-    }
-
-    async.map = doParallel(_asyncMap);
-    async.mapSeries = doSeries(_asyncMap);
-    async.mapLimit = doParallelLimit(_asyncMap);
-
-    // reduce only has a series version, as doing reduce in parallel won't
-    // work in many situations.
-    async.inject =
-    async.foldl =
-    async.reduce = function (arr, memo, iterator, callback) {
-        async.eachOfSeries(arr, function (x, i, callback) {
-            iterator(memo, x, function (err, v) {
-                memo = v;
-                callback(err);
-            });
-        }, function (err) {
-            callback(err || null, memo);
-        });
-    };
-
-    async.foldr =
-    async.reduceRight = function (arr, memo, iterator, callback) {
-        var reversed = _map(arr, identity).reverse();
-        async.reduce(reversed, memo, iterator, callback);
-    };
-
-    function _filter(eachfn, arr, iterator, callback) {
-        var results = [];
-        eachfn(arr, function (x, index, callback) {
-            iterator(x, function (v) {
-                if (v) {
-                    results.push({index: index, value: x});
-                }
-                callback();
-            });
-        }, function () {
-            callback(_map(results.sort(function (a, b) {
-                return a.index - b.index;
-            }), function (x) {
-                return x.value;
-            }));
-        });
-    }
-
-    async.select =
-    async.filter = doParallel(_filter);
-
-    async.selectLimit =
-    async.filterLimit = doParallelLimit(_filter);
-
-    async.selectSeries =
-    async.filterSeries = doSeries(_filter);
-
-    function _reject(eachfn, arr, iterator, callback) {
-        _filter(eachfn, arr, function(value, cb) {
-            iterator(value, function(v) {
-                cb(!v);
-            });
-        }, callback);
-    }
-    async.reject = doParallel(_reject);
-    async.rejectLimit = doParallelLimit(_reject);
-    async.rejectSeries = doSeries(_reject);
-
-    function _createTester(eachfn, check, getResult) {
-        return function(arr, limit, iterator, cb) {
-            function done() {
-                if (cb) cb(getResult(false, void 0));
-            }
-            function iteratee(x, _, callback) {
-                if (!cb) return callback();
-                iterator(x, function (v) {
-                    if (cb && check(v)) {
-                        cb(getResult(true, x));
-                        cb = iterator = false;
-                    }
-                    callback();
-                });
-            }
-            if (arguments.length > 3) {
-                eachfn(arr, limit, iteratee, done);
-            } else {
-                cb = iterator;
-                iterator = limit;
-                eachfn(arr, iteratee, done);
-            }
-        };
-    }
-
-    async.any =
-    async.some = _createTester(async.eachOf, toBool, identity);
-
-    async.someLimit = _createTester(async.eachOfLimit, toBool, identity);
-
-    async.all =
-    async.every = _createTester(async.eachOf, notId, notId);
-
-    async.everyLimit = _createTester(async.eachOfLimit, notId, notId);
-
-    function _findGetResult(v, x) {
-        return x;
-    }
-    async.detect = _createTester(async.eachOf, identity, _findGetResult);
-    async.detectSeries = _createTester(async.eachOfSeries, identity, _findGetResult);
-    async.detectLimit = _createTester(async.eachOfLimit, identity, _findGetResult);
-
-    async.sortBy = function (arr, iterator, callback) {
-        async.map(arr, function (x, callback) {
-            iterator(x, function (err, criteria) {
-                if (err) {
-                    callback(err);
-                }
-                else {
-                    callback(null, {value: x, criteria: criteria});
-                }
-            });
-        }, function (err, results) {
-            if (err) {
-                return callback(err);
-            }
-            else {
-                callback(null, _map(results.sort(comparator), function (x) {
-                    return x.value;
-                }));
-            }
-
-        });
-
-        function comparator(left, right) {
-            var a = left.criteria, b = right.criteria;
-            return a < b ? -1 : a > b ? 1 : 0;
-        }
-    };
-
-    async.auto = function (tasks, callback) {
-        callback = _once(callback || noop);
-        var keys = _keys(tasks);
-        var remainingTasks = keys.length;
-        if (!remainingTasks) {
-            return callback(null);
-        }
-
-        var results = {};
-
-        var listeners = [];
-        function addListener(fn) {
-            listeners.unshift(fn);
-        }
-        function removeListener(fn) {
-            var idx = _indexOf(listeners, fn);
-            if (idx >= 0) listeners.splice(idx, 1);
-        }
-        function taskComplete() {
-            remainingTasks--;
-            _arrayEach(listeners.slice(0), function (fn) {
-                fn();
-            });
-        }
-
-        addListener(function () {
-            if (!remainingTasks) {
-                callback(null, results);
-            }
-        });
-
-        _arrayEach(keys, function (k) {
-            var task = _isArray(tasks[k]) ? tasks[k]: [tasks[k]];
-            var taskCallback = _restParam(function(err, args) {
-                if (args.length <= 1) {
-                    args = args[0];
-                }
-                if (err) {
-                    var safeResults = {};
-                    _forEachOf(results, function(val, rkey) {
-                        safeResults[rkey] = val;
-                    });
-                    safeResults[k] = args;
-                    callback(err, safeResults);
-                }
-                else {
-                    results[k] = args;
-                    async.setImmediate(taskComplete);
-                }
-            });
-            var requires = task.slice(0, task.length - 1);
-            // prevent dead-locks
-            var len = requires.length;
-            var dep;
-            while (len--) {
-                if (!(dep = tasks[requires[len]])) {
-                    throw new Error('Has inexistant dependency');
-                }
-                if (_isArray(dep) && _indexOf(dep, k) >= 0) {
-                    throw new Error('Has cyclic dependencies');
-                }
-            }
-            function ready() {
-                return _reduce(requires, function (a, x) {
-                    return (a && results.hasOwnProperty(x));
-                }, true) && !results.hasOwnProperty(k);
-            }
-            if (ready()) {
-                task[task.length - 1](taskCallback, results);
-            }
-            else {
-                addListener(listener);
-            }
-            function listener() {
-                if (ready()) {
-                    removeListener(listener);
-                    task[task.length - 1](taskCallback, results);
-                }
-            }
-        });
-    };
-
-
-
-    async.retry = function(times, task, callback) {
-        var DEFAULT_TIMES = 5;
-        var DEFAULT_INTERVAL = 0;
-
-        var attempts = [];
-
-        var opts = {
-            times: DEFAULT_TIMES,
-            interval: DEFAULT_INTERVAL
-        };
-
-        function parseTimes(acc, t){
-            if(typeof t === 'number'){
-                acc.times = parseInt(t, 10) || DEFAULT_TIMES;
-            } else if(typeof t === 'object'){
-                acc.times = parseInt(t.times, 10) || DEFAULT_TIMES;
-                acc.interval = parseInt(t.interval, 10) || DEFAULT_INTERVAL;
-            } else {
-                throw new Error('Unsupported argument type for \'times\': ' + typeof t);
-            }
-        }
-
-        var length = arguments.length;
-        if (length < 1 || length > 3) {
-            throw new Error('Invalid arguments - must be either (task), (task, callback), (times, task) or (times, task, callback)');
-        } else if (length <= 2 && typeof times === 'function') {
-            callback = task;
-            task = times;
-        }
-        if (typeof times !== 'function') {
-            parseTimes(opts, times);
-        }
-        opts.callback = callback;
-        opts.task = task;
-
-        function wrappedTask(wrappedCallback, wrappedResults) {
-            function retryAttempt(task, finalAttempt) {
-                return function(seriesCallback) {
-                    task(function(err, result){
-                        seriesCallback(!err || finalAttempt, {err: err, result: result});
-                    }, wrappedResults);
-                };
-            }
-
-            function retryInterval(interval){
-                return function(seriesCallback){
-                    setTimeout(function(){
-                        seriesCallback(null);
-                    }, interval);
-                };
-            }
-
-            while (opts.times) {
-
-                var finalAttempt = !(opts.times-=1);
-                attempts.push(retryAttempt(opts.task, finalAttempt));
-                if(!finalAttempt && opts.interval > 0){
-                    attempts.push(retryInterval(opts.interval));
-                }
-            }
-
-            async.series(attempts, function(done, data){
-                data = data[data.length - 1];
-                (wrappedCallback || opts.callback)(data.err, data.result);
-            });
-        }
-
-        // If a callback is passed, run this as a controll flow
-        return opts.callback ? wrappedTask() : wrappedTask;
-    };
-
-    async.waterfall = function (tasks, callback) {
-        callback = _once(callback || noop);
-        if (!_isArray(tasks)) {
-            var err = new Error('First argument to waterfall must be an array of functions');
-            return callback(err);
-        }
-        if (!tasks.length) {
-            return callback();
-        }
-        function wrapIterator(iterator) {
-            return _restParam(function (err, args) {
-                if (err) {
-                    callback.apply(null, [err].concat(args));
-                }
-                else {
-                    var next = iterator.next();
-                    if (next) {
-                        args.push(wrapIterator(next));
-                    }
-                    else {
-                        args.push(callback);
-                    }
-                    ensureAsync(iterator).apply(null, args);
-                }
-            });
-        }
-        wrapIterator(async.iterator(tasks))();
-    };
-
-    function _parallel(eachfn, tasks, callback) {
-        callback = callback || noop;
-        var results = _isArrayLike(tasks) ? [] : {};
-
-        eachfn(tasks, function (task, key, callback) {
-            task(_restParam(function (err, args) {
-                if (args.length <= 1) {
-                    args = args[0];
-                }
-                results[key] = args;
-                callback(err);
-            }));
-        }, function (err) {
-            callback(err, results);
-        });
-    }
-
-    async.parallel = function (tasks, callback) {
-        _parallel(async.eachOf, tasks, callback);
-    };
-
-    async.parallelLimit = function(tasks, limit, callback) {
-        _parallel(_eachOfLimit(limit), tasks, callback);
-    };
-
-    async.series = function(tasks, callback) {
-        _parallel(async.eachOfSeries, tasks, callback);
-    };
-
-    async.iterator = function (tasks) {
-        function makeCallback(index) {
-            function fn() {
-                if (tasks.length) {
-                    tasks[index].apply(null, arguments);
-                }
-                return fn.next();
-            }
-            fn.next = function () {
-                return (index < tasks.length - 1) ? makeCallback(index + 1): null;
-            };
-            return fn;
-        }
-        return makeCallback(0);
-    };
-
-    async.apply = _restParam(function (fn, args) {
-        return _restParam(function (callArgs) {
-            return fn.apply(
-                null, args.concat(callArgs)
-            );
-        });
-    });
-
-    function _concat(eachfn, arr, fn, callback) {
-        var result = [];
-        eachfn(arr, function (x, index, cb) {
-            fn(x, function (err, y) {
-                result = result.concat(y || []);
-                cb(err);
-            });
-        }, function (err) {
-            callback(err, result);
-        });
-    }
-    async.concat = doParallel(_concat);
-    async.concatSeries = doSeries(_concat);
-
-    async.whilst = function (test, iterator, callback) {
-        callback = callback || noop;
-        if (test()) {
-            var next = _restParam(function(err, args) {
-                if (err) {
-                    callback(err);
-                } else if (test.apply(this, args)) {
-                    iterator(next);
-                } else {
-                    callback(null);
-                }
-            });
-            iterator(next);
-        } else {
-            callback(null);
-        }
-    };
-
-    async.doWhilst = function (iterator, test, callback) {
-        var calls = 0;
-        return async.whilst(function() {
-            return ++calls <= 1 || test.apply(this, arguments);
-        }, iterator, callback);
-    };
-
-    async.until = function (test, iterator, callback) {
-        return async.whilst(function() {
-            return !test.apply(this, arguments);
-        }, iterator, callback);
-    };
-
-    async.doUntil = function (iterator, test, callback) {
-        return async.doWhilst(iterator, function() {
-            return !test.apply(this, arguments);
-        }, callback);
-    };
-
-    async.during = function (test, iterator, callback) {
-        callback = callback || noop;
-
-        var next = _restParam(function(err, args) {
-            if (err) {
-                callback(err);
-            } else {
-                args.push(check);
-                test.apply(this, args);
-            }
-        });
-
-        var check = function(err, truth) {
-            if (err) {
-                callback(err);
-            } else if (truth) {
-                iterator(next);
-            } else {
-                callback(null);
-            }
-        };
-
-        test(check);
-    };
-
-    async.doDuring = function (iterator, test, callback) {
-        var calls = 0;
-        async.during(function(next) {
-            if (calls++ < 1) {
-                next(null, true);
-            } else {
-                test.apply(this, arguments);
-            }
-        }, iterator, callback);
-    };
-
-    function _queue(worker, concurrency, payload) {
-        if (concurrency == null) {
-            concurrency = 1;
-        }
-        else if(concurrency === 0) {
-            throw new Error('Concurrency must not be zero');
-        }
-        function _insert(q, data, pos, callback) {
-            if (callback != null && typeof callback !== "function") {
-                throw new Error("task callback must be a function");
-            }
-            q.started = true;
-            if (!_isArray(data)) {
-                data = [data];
-            }
-            if(data.length === 0 && q.idle()) {
-                // call drain immediately if there are no tasks
-                return async.setImmediate(function() {
-                    q.drain();
-                });
-            }
-            _arrayEach(data, function(task) {
-                var item = {
-                    data: task,
-                    callback: callback || noop
-                };
-
-                if (pos) {
-                    q.tasks.unshift(item);
-                } else {
-                    q.tasks.push(item);
-                }
-
-                if (q.tasks.length === q.concurrency) {
-                    q.saturated();
-                }
-            });
-            async.setImmediate(q.process);
-        }
-        function _next(q, tasks) {
-            return function(){
-                workers -= 1;
-                var args = arguments;
-                _arrayEach(tasks, function (task) {
-                    task.callback.apply(task, args);
-                });
-                if (q.tasks.length + workers === 0) {
-                    q.drain();
-                }
-                q.process();
-            };
-        }
-
-        var workers = 0;
-        var q = {
-            tasks: [],
-            concurrency: concurrency,
-            payload: payload,
-            saturated: noop,
-            empty: noop,
-            drain: noop,
-            started: false,
-            paused: false,
-            push: function (data, callback) {
-                _insert(q, data, false, callback);
-            },
-            kill: function () {
-                q.drain = noop;
-                q.tasks = [];
-            },
-            unshift: function (data, callback) {
-                _insert(q, data, true, callback);
-            },
-            process: function () {
-                if (!q.paused && workers < q.concurrency && q.tasks.length) {
-                    while(workers < q.concurrency && q.tasks.length){
-                        var tasks = q.payload ?
-                            q.tasks.splice(0, q.payload) :
-                            q.tasks.splice(0, q.tasks.length);
-
-                        var data = _map(tasks, function (task) {
-                            return task.data;
-                        });
-
-                        if (q.tasks.length === 0) {
-                            q.empty();
-                        }
-                        workers += 1;
-                        var cb = only_once(_next(q, tasks));
-                        worker(data, cb);
-                    }
-                }
-            },
-            length: function () {
-                return q.tasks.length;
-            },
-            running: function () {
-                return workers;
-            },
-            idle: function() {
-                return q.tasks.length + workers === 0;
-            },
-            pause: function () {
-                q.paused = true;
-            },
-            resume: function () {
-                if (q.paused === false) { return; }
-                q.paused = false;
-                var resumeCount = Math.min(q.concurrency, q.tasks.length);
-                // Need to call q.process once per concurrent
-                // worker to preserve full concurrency after pause
-                for (var w = 1; w <= resumeCount; w++) {
-                    async.setImmediate(q.process);
-                }
-            }
-        };
-        return q;
-    }
-
-    async.queue = function (worker, concurrency) {
-        var q = _queue(function (items, cb) {
-            worker(items[0], cb);
-        }, concurrency, 1);
-
-        return q;
-    };
-
-    async.priorityQueue = function (worker, concurrency) {
-
-        function _compareTasks(a, b){
-            return a.priority - b.priority;
-        }
-
-        function _binarySearch(sequence, item, compare) {
-            var beg = -1,
-                end = sequence.length - 1;
-            while (beg < end) {
-                var mid = beg + ((end - beg + 1) >>> 1);
-                if (compare(item, sequence[mid]) >= 0) {
-                    beg = mid;
-                } else {
-                    end = mid - 1;
-                }
-            }
-            return beg;
-        }
-
-        function _insert(q, data, priority, callback) {
-            if (callback != null && typeof callback !== "function") {
-                throw new Error("task callback must be a function");
-            }
-            q.started = true;
-            if (!_isArray(data)) {
-                data = [data];
-            }
-            if(data.length === 0) {
-                // call drain immediately if there are no tasks
-                return async.setImmediate(function() {
-                    q.drain();
-                });
-            }
-            _arrayEach(data, function(task) {
-                var item = {
-                    data: task,
-                    priority: priority,
-                    callback: typeof callback === 'function' ? callback : noop
-                };
-
-                q.tasks.splice(_binarySearch(q.tasks, item, _compareTasks) + 1, 0, item);
-
-                if (q.tasks.length === q.concurrency) {
-                    q.saturated();
-                }
-                async.setImmediate(q.process);
-            });
-        }
-
-        // Start with a normal queue
-        var q = async.queue(worker, concurrency);
-
-        // Override push to accept second parameter representing priority
-        q.push = function (data, priority, callback) {
-            _insert(q, data, priority, callback);
-        };
-
-        // Remove unshift function
-        delete q.unshift;
-
-        return q;
-    };
-
-    async.cargo = function (worker, payload) {
-        return _queue(worker, 1, payload);
-    };
-
-    function _console_fn(name) {
-        return _restParam(function (fn, args) {
-            fn.apply(null, args.concat([_restParam(function (err, args) {
-                if (typeof console === 'object') {
-                    if (err) {
-                        if (console.error) {
-                            console.error(err);
-                        }
-                    }
-                    else if (console[name]) {
-                        _arrayEach(args, function (x) {
-                            console[name](x);
-                        });
-                    }
-                }
-            })]));
-        });
-    }
-    async.log = _console_fn('log');
-    async.dir = _console_fn('dir');
-    /*async.info = _console_fn('info');
-    async.warn = _console_fn('warn');
-    async.error = _console_fn('error');*/
-
-    async.memoize = function (fn, hasher) {
-        var memo = {};
-        var queues = {};
-        hasher = hasher || identity;
-        var memoized = _restParam(function memoized(args) {
-            var callback = args.pop();
-            var key = hasher.apply(null, args);
-            if (key in memo) {
-                async.nextTick(function () {
-                    callback.apply(null, memo[key]);
-                });
-            }
-            else if (key in queues) {
-                queues[key].push(callback);
-            }
-            else {
-                queues[key] = [callback];
-                fn.apply(null, args.concat([_restParam(function (args) {
-                    memo[key] = args;
-                    var q = queues[key];
-                    delete queues[key];
-                    for (var i = 0, l = q.length; i < l; i++) {
-                        q[i].apply(null, args);
-                    }
-                })]));
-            }
-        });
-        memoized.memo = memo;
-        memoized.unmemoized = fn;
-        return memoized;
-    };
-
-    async.unmemoize = function (fn) {
-        return function () {
-            return (fn.unmemoized || fn).apply(null, arguments);
-        };
-    };
-
-    function _times(mapper) {
-        return function (count, iterator, callback) {
-            mapper(_range(count), iterator, callback);
-        };
-    }
-
-    async.times = _times(async.map);
-    async.timesSeries = _times(async.mapSeries);
-    async.timesLimit = function (count, limit, iterator, callback) {
-        return async.mapLimit(_range(count), limit, iterator, callback);
-    };
-
-    async.seq = function (/* functions... */) {
-        var fns = arguments;
-        return _restParam(function (args) {
-            var that = this;
-
-            var callback = args[args.length - 1];
-            if (typeof callback == 'function') {
-                args.pop();
-            } else {
-                callback = noop;
-            }
-
-            async.reduce(fns, args, function (newargs, fn, cb) {
-                fn.apply(that, newargs.concat([_restParam(function (err, nextargs) {
-                    cb(err, nextargs);
-                })]));
-            },
-            function (err, results) {
-                callback.apply(that, [err].concat(results));
-            });
-        });
-    };
-
-    async.compose = function (/* functions... */) {
-        return async.seq.apply(null, Array.prototype.reverse.call(arguments));
-    };
-
-
-    function _applyEach(eachfn) {
-        return _restParam(function(fns, args) {
-            var go = _restParam(function(args) {
-                var that = this;
-                var callback = args.pop();
-                return eachfn(fns, function (fn, _, cb) {
-                    fn.apply(that, args.concat([cb]));
-                },
-                callback);
-            });
-            if (args.length) {
-                return go.apply(this, args);
-            }
-            else {
-                return go;
-            }
-        });
-    }
-
-    async.applyEach = _applyEach(async.eachOf);
-    async.applyEachSeries = _applyEach(async.eachOfSeries);
-
-
-    async.forever = function (fn, callback) {
-        var done = only_once(callback || noop);
-        var task = ensureAsync(fn);
-        function next(err) {
-            if (err) {
-                return done(err);
-            }
-            task(next);
-        }
-        next();
-    };
-
-    function ensureAsync(fn) {
-        return _restParam(function (args) {
-            var callback = args.pop();
-            args.push(function () {
-                var innerArgs = arguments;
-                if (sync) {
-                    async.setImmediate(function () {
-                        callback.apply(null, innerArgs);
-                    });
-                } else {
-                    callback.apply(null, innerArgs);
-                }
-            });
-            var sync = true;
-            fn.apply(this, args);
-            sync = false;
-        });
-    }
-
-    async.ensureAsync = ensureAsync;
-
-    async.constant = _restParam(function(values) {
-        var args = [null].concat(values);
-        return function (callback) {
-            return callback.apply(this, args);
-        };
-    });
-
-    async.wrapSync =
-    async.asyncify = function asyncify(func) {
-        return _restParam(function (args) {
-            var callback = args.pop();
-            var result;
-            try {
-                result = func.apply(this, args);
-            } catch (e) {
-                return callback(e);
-            }
-            // if result is Promise object
-            if (_isObject(result) && typeof result.then === "function") {
-                result.then(function(value) {
-                    callback(null, value);
-                })["catch"](function(err) {
-                    callback(err.message ? err : new Error(err));
-                });
-            } else {
-                callback(null, result);
-            }
-        });
-    };
-
-    // Node.js
-    if (typeof module === 'object' && module.exports) {
-        module.exports = async;
-    }
-    // AMD / RequireJS
-    else if (typeof define === 'function' && define.amd) {
-        define([], function () {
-            return async;
-        });
-    }
-    // included directly via <script> tag
-    else {
-        root.async = async;
-    }
-
-}());
-
-}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"_process":50}],50:[function(require,module,exports){
+},{}],64:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -5748,880 +6485,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],51:[function(require,module,exports){
-var EventEmitter = require('generate-js-events');
-
-/**
- * A type assert method.
- * @param  {Any} variable
- * @param  {String} type
- * @return {void}
- */
-function assertType(variable, type) {
-    if (typeof variable !== type) {
-        throw new Error('Expected ' + type + ' but found ' + typeof variable);
-    }
-}
-
-var Bindable = EventEmitter.generate(
-    /**
-     * [Bindable description]
-     * @param {Object} data
-     */
-    function Bindable(data) {
-        var _ = this;
-
-        _.defineProperties({
-            _data: {}
-        });
-
-        for (var key in data) {
-            _._data[key] = data[key];
-        }
-    }
-);
-
-function makeGetter(property) {
-    return function getter() {
-        var _ = this;
-        return _.get(property);
-    };
-}
-
-function makeSetter(property) {
-    return function setter(val) {
-        var _ = this;
-        return _.set(property, val);
-    };
-}
-
-Bindable.generateGetters = function generateGetter(bindable, descriptor, properties) {
-    var getters = {},
-        p = properties || descriptor,
-        d = properties && descriptor;
-
-    properties = (p && typeof p === 'object') ? p : {};
-    descriptor = (d && typeof d === 'object') ? d : { enumerable: true };
-
-    for (var i = 0; i < properties.length; i++) {
-        getters[properties[i]] = {
-            get: makeGetter(properties[i])
-        };
-    }
-
-    bindable.definePrototype(descriptor, getters);
-};
-
-Bindable.generateSetters = function generateSetter(bindable, descriptor, properties) {
-    var setters = {},
-        p = properties || descriptor,
-        d = properties && descriptor;
-
-    properties = (p && typeof p === 'object') ? p : {};
-    descriptor = (d && typeof d === 'object') ? d : { enumerable: true };
-
-    for (var i = 0; i < properties.length; i++) {
-        setters[properties[i]] = {
-            set: makeSetter(properties[i])
-        };
-    }
-
-    bindable.definePrototype(descriptor, setters);
-};
-
-Bindable.generateGettersSetters = function generateGetter(bindable, descriptor, properties) {
-    var gettersSetters = {},
-        p = properties || descriptor,
-        d = properties && descriptor;
-
-    properties = (p && typeof p === 'object') ? p : [];
-    descriptor = (d && typeof d === 'object') ? d : { enumerable: true };
-
-    for (var i = 0; i < properties.length; i++) {
-        gettersSetters[properties[i]] = {
-            get: makeGetter(properties[i]),
-            set: makeSetter(properties[i])
-        };
-    }
-
-    bindable.definePrototype(descriptor, gettersSetters);
-};
-
-Bindable.definePrototype({
-    /**
-     * [get description]
-     * @param  {String} property
-     * @return {Any}
-     */
-    get: function get(property) {
-        var _ = this;
-
-        var overWrittenGetter = _['get'+property.slice(0, 1).toUpperCase()+property.slice(1)];
-        if (typeof overWrittenGetter === 'function') {
-            return overWrittenGetter.call(_);
-        }
-
-        return _._data[property];
-    },
-
-    /**
-     * [set description]
-     * @param {String} property
-     * @param {Any} newValue
-     * @param {Object} changer
-     */
-    set: function set(property, newValue, changer) {
-        changer = typeof changer === 'object' ? changer : null;
-
-        var _ = this;
-
-        var overWrittenSetter = _['set'+property.slice(0, 1).toUpperCase()+property.slice(1)];
-        if (typeof overWrittenSetter === 'function') {
-            return overWrittenSetter.call(_, newValue, changer);
-        }
-
-        var oldValue = _.get(property);
-        _._data[property] = newValue;
-
-        _.change(property, oldValue, newValue, changer);
-    },
-
-    /**
-     * [bind description]
-     * @param  {String} property
-     * @param  {Function} listener
-     * @param  {Object} observer
-     * @return {self}
-     */
-    bind: function bind(property, listener, observer) {
-        assertType(property, 'string');
-        assertType(listener, 'function');
-        assertType(observer, 'object');
-
-        var _ = this;
-
-        _.on(property, listener, observer);
-
-        var value = _.get(property);
-
-        _.__initial__ = true;
-
-        listener.call(_, value, value, false);
-
-        _.__initial__ = false;
-
-        return _;
-    },
-
-    /**
-     * [bindOnce description]
-     * @param  {String} property
-     * @param  {Function} listener
-     * @param  {Object} observer
-     * @return {self}
-     */
-    bindOnce: function bindOnce(property, listener, observer) {
-        assertType(property, 'string');
-        assertType(listener, 'function');
-        assertType(observer, 'object');
-
-        var _ = this;
-
-        _.once(property, listener, observer);
-
-        var value = _.get(property);
-
-        listener.call(_, value, value, false);
-
-        return _;
-    },
-
-    /**
-     * [unbind description]
-     * @param  {String} [property]
-     * @param  {Function} [listener]
-     * @param  {Object} [observer]
-     * @return {self}
-     */
-    unbind: function unbind(property, listener, observer) {
-        return this.off(property, listener, observer);
-    },
-
-    /**
-     * [change description]
-     * @param {String} property
-     * @param {Any} oldValue
-     * @param {Any} newValue
-     * @param {Object} changer
-     * @return {Boolean}
-     */
-    change: function change(property, oldValue, newValue, changer, object, nochaneevent) {
-        assertType(property, 'string');
-        assertType(changer, 'object');
-
-        var _ = this;
-
-        /**
-         * Creates a closure around the listener 'func' and 'args'.
-         * @param  {Function} func A listener.
-         * @return {Function}      Closure function.
-         */
-        function emitOnFunc(func) {
-            return function () {
-                func.call(_, oldValue, newValue, changer, object);
-            };
-        }
-
-        if (oldValue === newValue) return;
-
-        object = object && typeof object === 'object' ? object : _;
-
-        if (!nochaneevent) {
-            _.emit('changed', property, oldValue, newValue, changer, object);
-        }
-
-        var bindings = _.__events[property];
-
-        if (!bindings || !bindings.length) {
-            return false;
-        }
-
-        var length = bindings.length;
-
-        for (var i = 0; i < length; i++) {
-            if (!changer || bindings[i].observer !== changer) {
-                setTimeout(emitOnFunc(bindings[i].listener), 0);
-            }
-        }
-
-        return true;
-    }
-});
-
-module.exports = Bindable;
-
-},{"generate-js-events":52}],52:[function(require,module,exports){
-/**
- * @name events.js
- * @author Michaelangelo Jong
- */
-
-// Dependences:
-var Generator = require('generate-js');
-
-// Generator
-var EventEmitter = Generator.generate(
-    /**
-     * Create method.
-     */
-    function EventEmitter() {
-
-        this.defineProperties(
-            {
-                configurable: false,
-                enumerable: false,
-                writable: false
-            },
-            {
-                __events: Object.create(null)
-            }
-        );
-    }
-);
-
-// Prototype
-EventEmitter.definePrototype(
-    {
-        configurable: false,
-        enumerable: false,
-        writable: false
-    },
-    {
-        /**
-         * Adds a 'listener' on 'event' to this EventEmitter instance.
-         * @param  {String} event      Name of event.
-         * @param  {Function} listener Event handler function.
-         * @param  {Object} observer Object reference for binding.
-         * @return {EventEmitter}      This EventEmitter instance.
-         */
-        on: function on(event, listener, observer) {
-            var _ = this,
-                listeners = _.__events[event];
-
-            observer = typeof observer === 'object' ? observer : null;
-
-            if (typeof event === 'string' && typeof listener === 'function') {
-                if (!(listeners instanceof Array)) {
-                    listeners = _.__events[event] = [];
-                }
-
-                listeners.push({
-                    listener: listener,
-                    observer: observer
-                });
-            }
-
-            return _;
-        },
-
-        /**
-         * Adds a 'listener' on 'event' to this EventEmitter instance which is removed after one 'event'.
-         * @param  {String} event      Name of event.
-         * @param  {Function} listener Event handler function.
-         * @param  {Object} observer Object reference for binding.
-         * @return {EventEmitter}      This EventEmitter instance.
-         */
-        once: function once(event, listener, observer) {
-            var _ = this;
-            var onceListener = function onceListener() {
-                _.off(event, onceListener);
-                listener.apply(_, arguments);
-            };
-
-            _.on(event, onceListener, observer);
-
-            return _;
-        },
-
-        /**
-         * Removes a 'listener' on 'event', or all listeners on 'event', or all listeners from this EventEmitter instance.
-         * @param  {String} event      Name of event.
-         * @param  {Function} listener Event handler function.
-         * @param  {Object} observer Object reference for binding.
-         * @return {EventEmitter}      This EventEmitter instance.
-         */
-        off: function off() {
-            var _ = this,
-                listeners,
-                i,
-                key,
-
-                event = (typeof arguments[0] === 'string') ?
-                    arguments[0] :
-                    false,
-
-                listener = (typeof arguments[0] === 'function') ?
-                    arguments[0] :
-                    (typeof arguments[1] === 'function') ?
-                        arguments[1] :
-                        false,
-
-                observer = (typeof arguments[0] === 'object') ?
-                    arguments[0] :
-                    (typeof arguments[1] === 'object') ?
-                        arguments[1] :
-                        (typeof arguments[2] === 'object') ?
-                            arguments[2] :
-                            false;
-
-            if (typeof event === 'string') {
-                listeners = _.__events[event];
-
-                if (!(listeners instanceof Array)) {
-                    return _;
-                }
-
-                if (typeof listener === 'function' && typeof observer === 'object') {
-                    for (i = listeners.length - 1; i >= 0; i--) {
-                        if (listeners[i].listener === listener && listeners[i].observer === observer) {
-                            listeners.splice(i, 1);
-                        }
-                    }
-                } else if (typeof listener === 'function' || typeof observer === 'object') {
-                    for (i = listeners.length - 1; i >= 0; i--) {
-                        if (listeners[i].listener === listener || listeners[i].observer === observer) {
-                            listeners.splice(i, 1);
-                        }
-                    }
-                } else {
-                    delete _.__events[event];
-                }
-            } else if (typeof listener === 'function' || typeof observer === 'object') {
-                for (key in _.__events) {
-                    listeners = _.__events[key];
-                    for (i = listeners.length - 1; i >= 0; i--) {
-                        if (listeners[i].listener === listener || listeners[i].observer === observer) {
-                            listeners.splice(i, 1);
-                        }
-                    }
-                }
-            } else {
-                for (key in _.__events) {
-                    delete _.__events[key];
-                }
-            }
-
-            return _;
-        },
-
-        /**
-         * Emits an 'event' with 'args' on this EventEmitter instance.
-         * @param  {String} event      Name of event.
-         * @param  {Arguments} args    Event handler function.
-         * @return {EventEmitter}      This EventEmitter instance.
-         */
-        emit: function emit(event) {
-            var _ = this,
-                args = Array.prototype.slice.call(arguments, 1),
-                i,
-                length,
-                listener,
-                listeners;
-
-            /**
-             * Creates a closure around the listener 'func' and 'args'.
-             * @param  {Function} func A listener.
-             * @return {Function}      Closure function.
-             */
-            function emitOnFunc(func) {
-                return function () {
-                    func.apply(_, args);
-                };
-            }
-
-            listeners = _.__events[event];
-            window.listeners = listeners;
-
-            if (event === 'error' && !listeners && typeof _.onerror !== 'function') {
-                if (args[0] instanceof Error){
-                    throw args[0];
-                } else {
-                    throw args;
-                }
-            }
-
-            if (typeof _['on' + event] === 'function') {
-                setTimeout(emitOnFunc(_['on' + event]), 0);
-            }
-
-            if (listeners instanceof Array) {
-                length = listeners.length;
-
-                for (i = 0; i < length; i++) {
-                    listener = listeners[i].listener;
-                    setTimeout(emitOnFunc(listener), 0);
-                }
-            }
-            return _;
-        },
-
-        /**
-         * Emits an event object containing 'eventObject' on this EventEmitter instance.
-         * @param  {String} event Name of event.
-         * @param  {Object} eventObject  Event object sent to all on handlers.
-         * @return {EventEmitter} This EventEmitter instance.
-         */
-        emitEvent: function emitEvent(event, eventObject) {
-            var _ = this,
-                timestamp = Date.now();
-
-            eventObject = typeof eventObject === 'object' ? eventObject : { data: eventObject };
-
-            eventObject.type = event;
-            eventObject.timestamp = eventObject.timeStamp || eventObject.timestamp || timestamp;
-
-            _.emit(event, eventObject);
-            return _;
-        }
-    }
-);
-
-// Exports
-module.exports = EventEmitter;
-
-},{"generate-js":53}],53:[function(require,module,exports){
-/**
- * @name generate.js
- * @author Michaelangelo Jong
- */
-
-(function GeneratorScope() {
-
-// Variables
-var Creation = {},
-    Generation = {},
-    Generator = {};
-
-// Helper Methods
-
-/**
- * Assert Error function.
- * @param  {Boolean} condition Whether or not to throw error.
- * @param  {String} message    Error message.
- */
-function assertError(condition, message) {
-    if (!condition) {
-        throw new Error(message);
-    }
-}
-
-/**
- * Assert TypeError function.
- * @param  {Boolean} condition Whether or not to throw error.
- * @param  {String} message    Error message.
- */
-function assertTypeError(test, type) {
-    if (typeof test !== type) {
-        throw new TypeError('Expected \'' + type + '\' but instead found \'' + typeof test +'\'');
-    }
-}
-
-/**
- * Returns the name of function 'func'.
- * @param  {Function} func Any function.
- * @return {String}        Name of 'func'.
- */
-function getFunctionName(func) {
-    if (func.name !== void(0)) {
-        return func.name;
-    }
-    // Else use IE Shim
-    var funcNameMatch = func.toString().match(/function\s*([^\s]*)\s*\(/);
-    func.name = (funcNameMatch && funcNameMatch[1]) || '';
-    return func.name;
-}
-
-/**
- * Returns true if 'obj' is an object containing only get and set functions, false otherwise.
- * @param  {Any} obj Value to be tested.
- * @return {Boolean} true or false.
- */
-function isGetSet(obj) {
-    var keys, length;
-    if (obj && typeof obj === 'object') {
-        keys = Object.getOwnPropertyNames(obj).sort();
-        length = keys.length;
-
-        if ((length === 1 && (keys[0] === 'get' && typeof obj.get === 'function' ||
-                              keys[0] === 'set' && typeof obj.set === 'function')) ||
-            (length === 2 && (keys[0] === 'get' && typeof obj.get === 'function' &&
-                              keys[1] === 'set' && typeof obj.set === 'function'))) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Defines properties on 'obj'.
- * @param  {Object} obj        An object that 'properties' will be attached to.
- * @param  {Object} descriptor Optional object descriptor that will be applied to all attaching properties on 'properties'.
- * @param  {Object} properties An object who's properties will be attached to 'obj'.
- * @return {Generator}         'obj'.
- */
-function defineObjectProperties(obj, descriptor, properties) {
-    var setProperties = {},
-        i,
-        keys,
-        length,
-
-        p = properties || descriptor,
-        d = properties && descriptor;
-
-    properties = (p && typeof p === 'object') ? p : {};
-    descriptor = (d && typeof d === 'object') ? d : {};
-
-    keys = Object.getOwnPropertyNames(properties);
-    length = keys.length;
-
-    for (i = 0; i < length; i++) {
-        if (isGetSet(properties[keys[i]])) {
-            setProperties[keys[i]] = {
-                configurable: !!descriptor.configurable,
-                enumerable: !!descriptor.enumerable,
-                get: properties[keys[i]].get,
-                set: properties[keys[i]].set
-            };
-        } else {
-            setProperties[keys[i]] = {
-                configurable: !!descriptor.configurable,
-                enumerable: !!descriptor.enumerable,
-                writable: !!descriptor.writable,
-                value: properties[keys[i]]
-            };
-        }
-    }
-    Object.defineProperties(obj, setProperties);
-    return obj;
-}
-
-// Creation Class
-defineObjectProperties(
-    Creation,
-    {
-        configurable: false,
-        enumerable: false,
-        writable: false
-    },
-    {
-        /**
-         * Defines properties on this object.
-         * @param  {Object} descriptor Optional object descriptor that will be applied to all attaching properties.
-         * @param  {Object} properties An object who's properties will be attached to this object.
-         * @return {Object}            This object.
-         */
-        defineProperties: function defineProperties(descriptor, properties) {
-            defineObjectProperties(this, descriptor, properties);
-            return this;
-        },
-
-        /**
-         * returns the prototype of `this` Creation.
-         * @return {Object} Prototype of `this` Creation.
-         */
-        getProto: function getProto() {
-            return Object.getPrototypeOf(this);
-        },
-
-        /**
-         * returns the prototype of `this` super Creation.
-         * @return {Object} Prototype of `this` super Creation.
-         */
-        getSuper: function getSuper() {
-            return Object.getPrototypeOf(this.generator).proto;
-            // return Object.getPrototypeOf(Object.getPrototypeOf(this));
-        }
-    }
-);
-
-// Generation Class
-defineObjectProperties(
-    Generation,
-    {
-        configurable: false,
-        enumerable: false,
-        writable: false
-    },
-    {
-        name: 'Generation',
-
-        proto: Creation,
-
-        /**
-         * Creates a new instance of this Generator.
-         * @return {Generator} Instance of this Generator.
-         */
-        create: function create() {
-            var _ = this,
-                newObj = Object.create(_.proto);
-
-            _.__supercreate(newObj, arguments);
-
-            return newObj;
-        },
-
-        __supercreate: function __supercreate(newObj, args) {
-            var _ = this,
-                superGenerator = Object.getPrototypeOf(_),
-                supercreateCalled = false;
-
-            newObj.supercreate = function supercreate() {
-
-                supercreateCalled = true;
-
-                if (Generation.isGeneration(superGenerator)){
-                    superGenerator.__supercreate(newObj, arguments);
-                }
-            };
-
-            _.__create.apply(newObj, args);
-
-            if (!supercreateCalled) {
-                newObj.supercreate();
-            }
-
-            delete newObj.supercreate;
-        },
-
-        __create: function () {},
-
-        /**
-         * Generates a new generator that inherits from `this` generator.
-         * @param {Generator} ParentGenerator Generator to inherit from.
-         * @param {Function} create           Create method that gets called when creating a new instance of new generator.
-         * @return {Generator}                New Generator that inherits from 'ParentGenerator'.
-         */
-        generate: function generate(create) {
-            var _ = this;
-
-            assertError(Generation.isGeneration(_) || _ === Generation, 'Cannot call method \'generate\' on non-Generations.');
-            assertTypeError(create, 'function');
-
-            var newGenerator = Object.create(_),
-                newProto     = Object.create(_.proto);
-
-            defineObjectProperties(
-                newProto,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                {
-                    generator: newGenerator
-                }
-            );
-
-            defineObjectProperties(
-                newGenerator,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                {
-                    name: getFunctionName(create),
-                    proto: newProto,
-                    __create: create
-                }
-            );
-
-            return newGenerator;
-        },
-
-        /**
-         * Returns true if 'generator' was generated by this Generator.
-         * @param  {Generator} generator A Generator.
-         * @return {Boolean}             true or false.
-         */
-        isGeneration: function isGeneration(generator) {
-            var _ = this;
-            return _.isPrototypeOf(generator);
-        },
-
-        /**
-         * Returns true if 'object' was created by this Generator.
-         * @param  {Object} object An Object.
-         * @return {Boolean}       true or false.
-         */
-        isCreation: function isCreation(object) {
-            var _ = this;
-            return _.proto.isPrototypeOf(object);
-        },
-
-        /**
-         * Defines shared properties for all objects created by this generator.
-         * @param  {Object} descriptor Optional object descriptor that will be applied to all attaching properties.
-         * @param  {Object} properties An object who's properties will be attached to this generator's prototype.
-         * @return {Generator}         This generator.
-         */
-        definePrototype: function definePrototype(descriptor, properties) {
-            defineObjectProperties(this.proto, descriptor, properties);
-            return this;
-        },
-
-        /**
-         * Generator.toString method.
-         * @return {String} A string representation of this generator.
-         */
-        toString: function toString() {
-            return '[' + (this.name || 'generation') + ' Generator]';
-        }
-    }
-);
-
-// Generator Class Methods
-defineObjectProperties(
-    Generator,
-    {
-        configurable: false,
-        enumerable: false,
-        writable: false
-    },
-    {
-        /**
-         * Generates a new generator that inherits from `this` generator.
-         * @param {Generator} ParentGenerator Generator to inherit from.
-         * @param {Function} create           Create method that gets called when creating a new instance of new generator.
-         * @return {Generator}                New Generator that inherits from 'ParentGenerator'.
-         */
-        generate: function generate (create) {
-            return Generation.generate(create);
-        },
-
-        /**
-         * Returns true if 'generator' was generated by this Generator.
-         * @param  {Generator} generator A Generator.
-         * @return {Boolean}             true or false.
-         */
-        isGenerator: function isGenerator (generator) {
-            return Generation.isGeneration(generator);
-        },
-
-        /**
-         * [toGenerator description]
-         * @param  {Function} constructor A constructor function.
-         * @return {Generator}            A new generator who's create method is `constructor` and inherits from `constructor.prototype`.
-         */
-        toGenerator: function toGenerator(constructor) {
-
-            assertTypeError(constructor, 'function');
-
-            var newGenerator = Object.create(Generation),
-                newProto     = Object.create(constructor.prototype);
-
-            defineObjectProperties(
-                newProto,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                {
-                    generator: newGenerator
-                }
-            );
-
-            defineObjectProperties(
-                newProto,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                Creation
-            );
-
-            defineObjectProperties(
-                newGenerator,
-                {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false
-                },
-                {
-                    name: getFunctionName(constructor),
-                    proto: newProto,
-                    __create: constructor
-                }
-            );
-
-            return newGenerator;
-        }
-    }
-);
-
-Object.freeze(Creation);
-Object.freeze(Generation);
-Object.freeze(Generator);
-
-// Exports
-if (typeof define === 'function' && define.amd) {
-    // AMD
-    define(function() {
-        return Generator;
-    });
-} else if (typeof module === 'object' && typeof exports === 'object') {
-    // Node/CommonJS
-    module.exports = Generator;
-} else {
-    // Browser global
-    window.Generator = Generator;
-}
-
-}());
-
-},{}],54:[function(require,module,exports){
+},{}],65:[function(require,module,exports){
 /*!
  * jQuery JavaScript Library v2.1.4
  * http://jquery.com/
@@ -15833,7 +15697,7 @@ return jQuery;
 
 }));
 
-},{}],55:[function(require,module,exports){
+},{}],66:[function(require,module,exports){
 //! moment.js
 //! version : 2.10.6
 //! authors : Tim Wood, Iskren Chernev, Moment.js contributors
@@ -19029,4 +18893,4 @@ return jQuery;
     return _moment;
 
 }));
-},{}]},{},[25]);
+},{}]},{},[42]);

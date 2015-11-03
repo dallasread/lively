@@ -1,5 +1,5 @@
 var Bindable = require('generate-js-bindings'),
-    Bars = require('/Users/dread/Apps/compilr/Bars'),
+    Bars = require('/Users/dread/Apps/archive/compilr/Bars'),
     globalBars = Bars.create();
 
 function attach(config) {

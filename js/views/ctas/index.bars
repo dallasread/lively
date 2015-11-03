@@ -1,0 +1,7 @@
+<div class="cta">
+    {{>cta-bar}}
+
+    <div class="cta-content">
+        <div data-outlet></div>
+    </div>
+</div>

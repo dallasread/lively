@@ -1,10 +1,9 @@
-var Route = require('../../utils/route'),
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/conversations/index.bars')
         },
         partials: {
-            'top-bar': require('../../views/application/top-bar.bars'),
             'filters': require('../../views/application/filters.bars')
         }
     };

@@ -1,0 +1,55 @@
+{
+    "swagger": "2.0",
+    "title": "VisitorAPI",
+    "x-apiDeploy": {
+        "aws": {
+            "profile": "personal",
+            "region": "us-east-1"
+        },
+        "lambda": {
+            "memory-size": 128,
+            "role": "arn:aws:iam::347191724861:role/Lambda",
+            "runtime": "nodejs",
+            "timeout": 60
+        },
+        "sdk": {
+            "name": "RM",
+            "path": "./sdk.js",
+            "method": "restAPI"
+        },
+        "restAPI": {
+            "id": "gnxdeqs2zb"
+        }
+    },
+    "paths": {
+        "/events": {
+            "GET": {
+                "x-apiDeploy": {
+                    "lambda": {
+                        "handler": "./events/create.js",
+                        "id": "arn:aws:lambda:us-east-1:347191724861:function:RM-Events-Get"
+                    },
+                    "sdk": {
+                        "method": "getEvent"
+                    },
+                    "restAPI": {
+                        "id": "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:347191724861:function:RM-Events-Get/invocations"
+                    }
+                },
+                "operationId": "RM-Events-Get"
+            },
+            "x-apiDeploy": {
+                "restAPI": {
+                    "id": "20u4v6"
+                }
+            }
+        },
+        "/": {
+            "x-apiDeploy": {
+                "restAPI": {
+                    "id": "rhnlsr6dn4"
+                }
+            }
+        }
+    }
+}

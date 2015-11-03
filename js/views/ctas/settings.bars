@@ -1,12 +1,6 @@
-<div class="cta">
-    {{>cta-bar}}
-
-    <div class="cta-content">
-        - Hide for small mobile devices
-        - Hide for tablets
-        - Hide for desktops
-        - Which pages should SHOW this CTA?
-        - Which pages should HIDE this CTA?
-        - Delete all history
-    </div>
-</div>
+- Hide for small mobile devices
+- Hide for tablets
+- Hide for desktops
+- Which pages should SHOW this CTA?
+- Which pages should HIDE this CTA?
+- Delete all history

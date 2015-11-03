@@ -1,10 +1,7 @@
-var Route = require('../../utils/route'),
+var Route = require('/Users/dread/Apps/bars-app').Route,
     config = {
         templates: {
             index: require('../../views/ctas/show.bars')
-        },
-        partials: {
-            'cta-bar': require('../../views/ctas/cta-bar.bars')
         }
     };
 

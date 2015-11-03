@@ -1,9 +1,26 @@
-<div class="cta">
-    {{>cta-bar}}
-    <div class="screen"></div>
-
-    <div class="cta-content">
-        DASHBOARD<br><br>
-        Total chats, Ratings, average time to first response, availability, visitors online
-    </div>
+<div class="container container-narrow">
+    <h2>{{app/cta/name}} by the Numbers...</h2>
+    <!-- Popular pages to chat on? -->
+    <table>
+        <tr>
+            <td>How many visitors have seen the chat in the last week?</td>
+            <td class="align-right"><strong>13,111</strong></td>
+        </tr>
+        <tr>
+            <td>How many visitors have interacted with the chat?</td>
+            <td class="align-right"><strong>400 (5.3%)</strong></td>
+        </tr>
+        <tr>
+            <td>How many visitors are online now?</td>
+            <td class="align-right"><strong>23</strong></td>
+        </tr>
+        <tr>
+            <td>How long is the average conversation?</td>
+            <td class="align-right"><strong>4:11</strong></td>
+        </tr>
+        <!-- <tr>
+            <td>When is the chat availabile?</td>
+            <td class="align-right"><strong>11:11</strong></td>
+        </tr> -->
+    </table>
 </div>

@@ -1,22 +1,26 @@
-# TODO
-- FB Login (save email)
-  - Hit /oauth/:provider for URL
-  - Send to FBURL?/oauth
-  - Return to /oauth?Accesstoken=xxx
-  - Save Access Token
-  - Redirect to ca.gov.vote
-- Vote
-- Suggest an issue
-- Suggest a stance
-- Populate 5 issues
+## Todo
+- API Gateway integration
+- Visitor API
+  - EventsCreate (messages, visit, leave)
+  - PersonConnect/Disconnect (record event if !since)
+  - PersonUpdate (just isTyping and isOnline)
+- Trigger
+- InteractiveSurvey
+- Survey
 
-# Bars
-- HTML Escape
-- Use {{outlet}}
-- String literals for helpers
-- History API
+- Admin API
+  - UsersCreate/Update
+  - CTAsUpdate
+  - AgentConnect
+  - AgentUpdate
+  - EventsCreate
 
-# API
-- /issues/{id}/vote [stanceID]
-- FB SDK
-- /oauth/:provider
+- SMS
+- Billing
+
+- Map to WP Plugin
+
+# Pricing (Addons)
+- 10 Engagements per month (FREE)
+- 100 Engagements per month ($29)
+- 1000 Engagements per month ($99)
